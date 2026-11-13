@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://tile.openstreetmap.org; connect-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="theme-color" content="#0d1117">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<title>Field Planner</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --panel2: #1f2630; --line: #30363d;
+    --text: #e6edf3; --muted: #8b949e; --accent: #2dd4bf; --accent-ink: #04201c;
+    --ok: #3fb950; --bad: #f85149; --warn: #d29922; --enemy: #f85149; --ally: #58a6ff;
+    --field: #2dd4bf; --r: 14px; --tap: 52px;
+    --safe-b: env(safe-area-inset-bottom, 0px);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; overscroll-behavior: none; }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  #map { position: fixed; inset: 0; background: #0b0f14; }
+  .leaflet-container { background: #0b0f14; }
+  /* escurece o mapa OSM para o tema escuro */
+  .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.85) contrast(.9) saturate(.6); }
+  .leaflet-control-attribution { background: rgba(13,17,23,.8) !important; color: var(--muted) !important; }
+  .leaflet-control-attribution a { color: var(--ally) !important; }
+  .leaflet-popup-content-wrapper, .leaflet-popup-tip { background: var(--panel); color: var(--text); }
+  .leaflet-tooltip { background: var(--panel); color: var(--text); border-color: var(--line); }
+
+  /* topo */
+  #topbar { position: fixed; top: 0; left: 0; right: 0; z-index: 1000; display: flex; gap: 8px; align-items: center;
+    padding: calc(8px + env(safe-area-inset-top, 0px)) 12px 8px; background: linear-gradient(var(--bg), rgba(13,17,23,0)); pointer-events: none; }
+  #topbar > * { pointer-events: auto; }
+  #title { font-weight: 700; letter-spacing: .3px; }
+  .chip { background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px; font-size: 13px; color: var(--muted); white-space: nowrap; }
+  .chip.ok { color: var(--ok); } .chip.bad { color: var(--bad); } .chip.warn { color: var(--warn); }
+  .spacer { flex: 1; }
+
+  /* folha inferior */
+  #sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 1000; background: var(--panel); border-top: 1px solid var(--line);
+    border-radius: 18px 18px 0 0; max-height: 62vh; display: flex; flex-direction: column; padding-bottom: var(--safe-b);
+    transition: max-height .2s; box-shadow: 0 -8px 24px rgba(0,0,0,.4); }
+  #sheet.min { max-height: calc(64px + var(--safe-b)); }
+  #sheet.min .sheet-body { display: none; }
+  .grab { width: 44px; height: 5px; border-radius: 3px; background: var(--line); margin: 8px auto 2px; }
+  .tabs { display: flex; gap: 6px; padding: 6px 10px; }
+  .tabs button { flex: 1; min-height: 44px; background: transparent; border: 0; border-radius: 10px; color: var(--muted); font-weight: 600; }
+  .tabs button[aria-selected="true"] { background: var(--panel2); color: var(--text); }
+  .sheet-body { overflow-y: auto; padding: 4px 12px 12px; -webkit-overflow-scrolling: touch; }
+  section[hidden] { display: none; }
+
+  .btn { min-height: var(--tap); border-radius: var(--r); border: 1px solid var(--line); background: var(--panel2); padding: 0 16px; font-weight: 600; }
+  .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+  .btn.ok { background: var(--ok); color: #031; border-color: transparent; }
+  .btn.bad { background: var(--bad); color: #300; border-color: transparent; }
+  .btn.ghost { background: transparent; }
+  .btn.sm { min-height: 40px; padding: 0 12px; font-size: 14px; }
+  .btn:disabled { opacity: .45; }
+  .row { display: flex; gap: 8px; align-items: center; margin: 8px 0; flex-wrap: wrap; }
+  .row > .grow { flex: 1; }
+  .stack { display: grid; gap: 8px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  label.f { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+  input, select, textarea { width: 100%; min-height: 46px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; }
+  textarea { min-height: 70px; resize: vertical; }
+  .muted { color: var(--muted); font-size: 14px; }
+  .small { font-size: 12px; }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 8px 0; }
+  .stat { background: var(--panel2); border-radius: 10px; padding: 8px; text-align: center; }
+  .stat b { display: block; font-size: 20px; }
+  .stat span { font-size: 11px; color: var(--muted); }
+  ol.steps, ul.list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+  ol.steps li, ul.list li { background: var(--panel2); border-radius: 10px; padding: 10px 12px; }
+  ol.steps li.done { opacity: .5; }
+  .num { display: inline-grid; place-items: center; min-width: 24px; height: 24px; border-radius: 12px; background: var(--accent); color: var(--accent-ink); font-size: 12px; font-weight: 700; padding: 0 6px; margin-right: 4px; }
+  .lv { display: inline-block; min-width: 28px; text-align: center; border-radius: 6px; font-size: 12px; font-weight: 700; padding: 1px 4px; color: #000; }
+  .item { display: flex; gap: 8px; align-items: center; }
+  .item .grow { flex: 1; min-width: 0; }
+  .item .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .keys { display: flex; align-items: center; gap: 4px; }
+  .keys button { width: 40px; height: 40px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); font-size: 20px; }
+  .keys b { min-width: 28px; text-align: center; }
+  h3 { margin: 14px 0 6px; font-size: 15px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  td, th { padding: 6px 4px; border-bottom: 1px solid var(--line); text-align: left; }
+  td.n, th.n { text-align: right; }
+
+  /* modo em campo */
+  #field { position: fixed; left: 0; right: 0; bottom: 0; z-index: 1100; background: var(--panel); border-top: 2px solid var(--accent);
+    border-radius: 18px 18px 0 0; padding: 12px 12px calc(12px + var(--safe-b)); box-shadow: 0 -8px 24px rgba(0,0,0,.5); }
+  #field[hidden] { display: none; }
+  #field .head { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+  #field .target { font-size: 22px; font-weight: 700; margin: 6px 0 2px; line-height: 1.2; }
+  #field .dist { display: flex; align-items: center; gap: 10px; font-size: 18px; }
+  #arrow { width: 36px; height: 36px; transition: transform .3s; }
+  #field .link { margin: 10px 0; padding: 12px; background: var(--panel2); border-radius: 12px; font-size: 18px; }
+  #field .link small { display: block; color: var(--muted); font-size: 13px; }
+  #field .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  #field .actions .btn { min-height: 64px; font-size: 18px; }
+  #field .sub { display: flex; gap: 8px; margin-top: 8px; }
+  #field .sub .btn { flex: 1; }
+  body.fieldmode #sheet { display: none; }
+
+  dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 16px; width: min(520px, 94vw); padding: 16px; max-height: 90vh; }
+  dialog::backdrop { background: rgba(0,0,0,.6); }
+  dialog h2 { margin: 0 0 10px; font-size: 18px; }
+  #toast { position: fixed; left: 50%; top: calc(56px + env(safe-area-inset-top, 0px)); transform: translateX(-50%); z-index: 2000;
+    background: var(--panel2); border: 1px solid var(--line); padding: 10px 14px; border-radius: 12px; max-width: 90vw; display: none; }
+  .lbl { background: var(--accent); color: var(--accent-ink); border-radius: 10px; font: 700 11px/18px system-ui; text-align: center; min-width: 18px; padding: 0 4px; box-shadow: 0 0 0 2px #0d1117; }
+  .lbl.cur { background: #fff; color: #000; }
+  .lbl.done { background: var(--muted); }
+  .me { width: 18px; height: 18px; border-radius: 50%; background: #58a6ff; border: 3px solid #fff; box-shadow: 0 0 0 6px rgba(88,166,255,.25); }
+  .fab { position: fixed; right: 12px; z-index: 1000; width: 52px; height: 52px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); font-size: 22px; }
+</style>
+</head>
+<body>
+<div id="map" aria-label="Mapa"></div>
+
+<header id="topbar">
+  <span id="title">Field Planner</span>
+  <span class="spacer"></span>
+  <span id="gpsChip" class="chip">GPS…</span>
+  <span id="offChip" class="chip" hidden>offline</span>
+</header>
+
+<button id="centerBtn" class="fab" style="bottom: calc(80px + var(--safe-b));" aria-label="Centralizar na minha posição">◎</button>
+
+<!-- Folha inferior -->
+<div id="sheet" class="min">
+  <div class="grab" id="grab" role="button" aria-label="Expandir/recolher painel"></div>
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-tab="plano" aria-selected="true">Plano</button>
+    <button role="tab" data-tab="portais" aria-selected="false">Portais</button>
+    <button role="tab" data-tab="ajustes" aria-selected="false">Ajustes</button>
+  </nav>
+  <div class="sheet-body">
+    <section id="tab-plano">
+      <div class="grid2">
+        <label class="f">Raio a pé (m)<input id="cfgRadius" type="number" inputmode="numeric" min="100" step="100"></label>
+        <label class="f">Links de saída por portal<input id="cfgMaxOut" type="number" inputmode="numeric" min="1" max="40"></label>
+      </div>
+      <div class="row">
+        <label class="f grow">Objetivo
+          <select id="cfgObjective">
+            <option value="campos">Máx. campos</option>
+            <option value="ap">Máx. AP</option>
+            <option value="distancia">Mín. distância (AP por metro)</option>
+          </select>
+        </label>
+        <label class="f grow">Estratégia
+          <select id="cfgStrategy">
+            <option value="auto">Automática</option>
+            <option value="fanfield">Fanfield</option>
+            <option value="triangulacao">Triangulação</option>
+          </select>
+        </label>
+      </div>
+      <div class="row">
+        <button id="optBtn" class="btn primary grow">Calcular plano</button>
+        <button id="startBtn" class="btn grow" disabled>Modo em campo</button>
+      </div>
+      <div id="planOut"><p class="muted">Cadastre portais (toque longo no mapa, ou aba Portais) e toque em “Calcular plano”.</p></div>
+    </section>
+
+    <section id="tab-portais" hidden>
+      <div class="row">
+        <button id="addPortalBtn" class="btn primary grow">+ Portal</button>
+        <button id="pasteBtn" class="btn grow">Colar link</button>
+      </div>
+      <input id="search" type="search" placeholder="Buscar portal…" aria-label="Buscar portal">
+      <p class="muted small">Toque longo no mapa também adiciona um portal no ponto.</p>
+      <ul id="portalList" class="list"></ul>
+    </section>
+
+    <section id="tab-ajustes" hidden>
+      <h3>Links bloqueadores</h3>
+      <p class="muted small">Links que já existem no terreno e impedem cruzamentos. Informe apenas os dois portais e a origem.</p>
+      <div class="row"><button id="addBlockerBtn" class="btn grow">+ Bloqueador</button></div>
+      <ul id="blockerList" class="list"></ul>
+
+      <h3>Links já feitos por mim</h3>
+      <p class="muted small" id="doneInfo"></p>
+      <div class="row">
+        <button id="clearDoneBtn" class="btn sm grow">Limpar links feitos</button>
+        <button id="clearExclBtn" class="btn sm grow">Limpar pares falhos</button>
+      </div>
+
+      <h3>Dados</h3>
+      <div class="row">
+        <button id="exportBtn" class="btn grow">Exportar JSON</button>
+        <button id="importBtn" class="btn grow">Importar JSON</button>
+        <input id="importFile" type="file" accept="application/json,.json" hidden>
+      </div>
+      <div class="row"><button id="wipeBtn" class="btn bad grow">Apagar todos os dados</button></div>
+
+      <h3>Conformidade</h3>
+      <p class="muted small">Ferramenta independente, sem afiliação à Niantic. Não se comunica com servidores do jogo nem com o app: todos os portais são digitados por você e ficam só neste aparelho. O GPS é apenas lido. A única rede usada são os blocos de mapa do OpenStreetMap.</p>
+      <p class="muted small" id="versionInfo"></p>
+    </section>
+  </div>
+</div>
+
+<!-- Modo em campo -->
+<div id="field" hidden aria-live="polite">
+  <div class="head">
+    <span id="fStep">Passo –</span><span class="spacer"></span>
+    <span id="fSummary"></span>
+    <button id="fExit" class="btn sm ghost" aria-label="Sair do modo em campo">Sair ✕</button>
+  </div>
+  <div class="target" id="fTarget">–</div>
+  <div class="dist">
+    <svg id="arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 L19 21 L12 17 L5 21 Z" fill="currentColor"/></svg>
+    <span id="fDist">–</span>
+  </div>
+  <div class="link" id="fLink">–</div>
+  <div class="actions">
+    <button id="fFail" class="btn bad">✕ Falhou</button>
+    <button id="fDone" class="btn ok">✓ Concluído</button>
+  </div>
+  <div class="sub">
+    <button id="fUndo" class="btn sm">↶ Desfazer</button>
+    <button id="fRecalc" class="btn sm">⟳ Recalcular</button>
+  </div>
+</div>
+
+<!-- Diálogo: portal -->
+<dialog id="portalDlg">
+  <form method="dialog" class="stack" id="portalForm">
+    <h2 id="portalDlgTitle">Portal</h2>
+    <label class="f">Nome<input name="nome" required maxlength="80" autocomplete="off"></label>
+    <label class="f">Colar link ou coordenadas (opcional)<input name="link" placeholder="ex.: link de mapa com lat,lng" autocomplete="off"></label>
+    <div class="grid2">
+      <label class="f">Latitude<input name="lat" type="number" step="any" required inputmode="decimal"></label>
+      <label class="f">Longitude<input name="lng" type="number" step="any" required inputmode="decimal"></label>
+    </div>
+    <div class="grid2">
+      <label class="f">Nível (1–8)<select name="nivel"></select></label>
+      <label class="f">Chaves<input name="chaves" type="number" min="0" max="999" step="1" inputmode="numeric"></label>
+    </div>
+    <label class="f">Observação<textarea name="observacao" maxlength="300" placeholder="Ex.: chave no ponto de ônibus. Não registre nomes de agentes."></textarea></label>
+    <div class="row">
+      <button value="delete" id="portalDelete" class="btn bad sm" formnovalidate>Excluir</button>
+      <span class="spacer"></span>
+      <button value="cancel" class="btn ghost" formnovalidate>Cancelar</button>
+      <button value="save" class="btn primary">Salvar</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Diálogo: bloqueador -->
+<dialog id="blockerDlg">
+  <form method="dialog" class="stack">
+    <h2>Link bloqueador</h2>
+    <label class="f">Portal A<select name="a" required></select></label>
+    <label class="f">Portal B<select name="b" required></select></label>
+    <label class="f">Origem
+      <select name="origem"><option value="inimigo">Inimigo</option><option value="aliado">Aliado</option></select>
+    </label>
+    <div class="row"><span class="spacer"></span>
+      <button value="cancel" class="btn ghost" formnovalidate>Cancelar</button>
+      <button value="save" class="btn primary">Adicionar</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Diálogo: falha -->
+<dialog id="failDlg">
+  <form method="dialog" class="stack">
+    <h2>Por que o link falhou?</h2>
+    <p class="muted" id="failWhat"></p>
+    <button value="blocked" class="btn">Bloqueado por outro link</button>
+    <button value="nokey" class="btn">Não tenho a chave</button>
+    <button value="covered" class="btn">Portal está sob um campo</button>
+    <button value="other" class="btn">Outro motivo (pular este par)</button>
+    <button value="cancel" class="btn ghost" formnovalidate>Cancelar</button>
+  </form>
+</dialog>
+
+<!-- Diálogo: colar -->
+<dialog id="pasteDlg">
+  <form method="dialog" class="stack">
+    <h2>Colar link de compartilhamento</h2>
+    <p class="muted small">Só lemos as coordenadas do texto. O link nunca é aberto.</p>
+    <textarea name="text" placeholder="Cole aqui um link de mapa ou “-23.55, -46.63”"></textarea>
+    <div class="row"><span class="spacer"></span>
+      <button value="cancel" class="btn ghost" formnovalidate>Cancelar</button>
+      <button value="ok" class="btn primary">Continuar</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Diálogo: confirmação genérica -->
+<dialog id="confirmDlg">
+  <form method="dialog" class="stack">
+    <h2 id="confirmTitle">Confirmar</h2>
+    <p id="confirmText" class="muted"></p>
+    <div class="row"><span class="spacer"></span>
+      <button value="cancel" class="btn ghost">Cancelar</button>
+      <button value="ok" class="btn bad">Confirmar</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="toast" role="status"></div>
+
+<script src="vendor/leaflet/leaflet.js"></script>
+<script src="geo.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

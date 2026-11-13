@@ -1,0 +1,11 @@
+{
+  "name": "field-planner",
+  "version": "1.0.0",
+  "private": true,
+  "description": "PWA offline para planejar campos pequenos a pé. Dados 100% manuais.",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "start": "python3 -m http.server 8080"
+  },
+  "license": "MIT"
+}
