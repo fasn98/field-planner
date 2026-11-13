@@ -50,6 +50,13 @@ Geolocalização e service worker exigem **contexto seguro**: `localhost` funcio
 HTTPS (GitHub Pages, Netlify, etc. — são só arquivos estáticos). Depois do primeiro acesso, "Adicionar à
 tela inicial" instala o app e ele abre sem internet (os tiles já visualizados ficam em cache).
 
+> **Aviso — seus dados ficam só no `localStorage` deste navegador.** O app pede armazenamento persistente
+> (`navigator.storage.persist`), mas o Safari/iOS pode apagar dados de sites não instalados após 7 dias
+> sem uso. Instale o app na tela inicial e exporte o JSON regularmente (Ajustes → Exportar).
+
+> **Atualização:** o service worker serve a versão em cache. Para ver uma versão nova, recarregue a página
+> duas vezes. A versão aparece no fim da aba Ajustes.
+
 ### Cadastrar portais
 
 - **Toque longo no mapa** → formulário já com a coordenada.
@@ -120,6 +127,11 @@ junto com quantos campos a mais isso renderia.
   sem campo real seria tratado como campo.
 - Alcance não considera Link Amps nem outros mods.
 - A seta do modo em campo é relativa ao norte quando o GPS não fornece direção de movimento.
+- O fanfield não respeita o orçamento de tempo com muitos portais: cerca de 800 ms com 80 portais, e o
+  tempo cresce rápido.
+- Cada recálculo pode trocar de estratégia ou de âncora no meio de um fanfield.
+- Os tiles em cache não expiram (máximo de 3000, `sw.js:11`).
+- Os fluxos de `app.js` e `sw.js` não têm teste automatizado.
 
 ---
 
@@ -157,6 +169,7 @@ npm test     # node --test, sem dependências
 | `tests/under-field.test.js` | regra "portal sob campo": interior/exterior/vértice/aresta/degenerado; no otimizador com campo aliado, inimigo e planejado; replay de um plano completo |
 | `tests/optimizer.test.js` | fanfield, links não se cruzam, bloqueador, chaves, limite de saída, alcance por nível, raio, pares falhos, 2-opt |
 | `tests/parse-and-compliance.test.js` | extração de coordenadas; ausência de domínios da Niantic no código; CSP |
+| `tests/review-fixes.test.js` | ids `__proto__`/`constructor`/`toString` em portais, bloqueadores, done e excluded; portais na mesma posição nunca linkados; portal visitado sem links vira destino do fan |
 
 ## Estrutura
 
