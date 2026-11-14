@@ -2,6 +2,28 @@
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Datas no formato AAAA-MM-DD.
 
+## [1.2.2] — 2026-11-14
+### Adicionado
+- Atualização automática: o service worker serve os arquivos de um cache por `VERSION`, sem misturar versões. A instalação baixa tudo com `cache: 'reload'`, o registro usa `updateViaCache: 'none'`, e o app procura versão nova ao abrir, ao voltar para o app e a cada 30 min (`sw.js:25-28`, `app.js:1029-1032`).
+- Quando uma versão nova assume logo após a abertura (menos de 20 s), sem modo em campo, plano nem diálogo aberto, o app recarrega sozinho; nos outros casos mostra "Nova versão disponível" (`app.js:1035-1044`).
+- Aba Portais: o contador de chaves ganha o rótulo "🔑 Chaves", zero aparece em vermelho com "sem chave: não recebe links", e a linha mostra nível e alcance (`app.js:467-476`).
+- Plano sem links explica o motivo provável: portais sem chave, portais em L1, poucos portais no raio (`app.js:405-416`).
+- Teste confirma que `VERSION` é a mesma em `app.js`, `sw.js` e `package.json`.
+
+### Corrigido
+- Importar de novo um JSON cujos portais não têm `id` não duplica: portal a menos de 10 m de um existente é tratado como o mesmo e mantém chaves e nível já ajustados (`app.js:665-666`).
+- O import de JSON aceita `latitude`, `longitude` e `lon` além de `lat`/`lng` (`app.js:66-68`).
+- Mensagens de erro ficam 10 s na tela (`app.js:141`).
+- O botão `+` da aba Portais não é mais cortado no celular.
+
+### Conhecido
+- Quem está na 1.2.1 precisa de uma recarga extra para a 1.2.2 assumir.
+
+## [1.2.1] — 2026-11-14
+### Corrigido
+- O import de JSON aceita a chave `"portais"` além de `"portals"` (`app.js:655`).
+- **Não revisado:** esta mudança não passou pelo reviewer.
+
 ## [1.2.0] — 2026-11-14
 ### Adicionado
 - "Importar lista de links" na aba Portais: uma linha por portal, com link do Google Maps ou coordenadas; o nome é opcional e, sem ele, o portal vira "Portal NN" (próximo número livre). Mostra prévia editável antes de salvar, com nível e chaves padrão para o lote (`index.html`, `app.js:673`).

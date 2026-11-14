@@ -54,8 +54,10 @@ tela inicial" instala o app e ele abre sem internet (os tiles já visualizados f
 > (`navigator.storage.persist`), mas o Safari/iOS pode apagar dados de sites não instalados após 7 dias
 > sem uso. Instale o app na tela inicial e exporte o JSON regularmente (Ajustes → Exportar).
 
-> **Atualização:** o service worker serve a versão em cache. Para ver uma versão nova, recarregue a página
-> duas vezes. A versão aparece no fim da aba Ajustes.
+> **Atualização:** é automática. O app procura versão nova ao abrir, ao voltar para ele e a cada 30 min.
+> Logo depois de abrir, se não houver modo em campo, plano nem diálogo aberto, ele recarrega sozinho. Com o
+> app em uso, aparece o aviso "Nova versão disponível": toque para recarregar. A versão aparece no fim da
+> aba Ajustes.
 
 ### Cadastrar portais
 
@@ -72,6 +74,10 @@ tela inicial" instala o app e ele abre sem internet (os tiles já visualizados f
   **Links curtos** (`maps.app.goo.gl`) não têm coordenadas e são recusados: abra o link no navegador e
   copie o endereço completo, ou toque e segure no mapa do Google Maps e copie as coordenadas.
 - **Ajustes → Importar/Exportar JSON** (formato abaixo).
+  Aceita a chave `"portals"` ou `"portais"` e `lat`/`lng` ou `latitude`/`longitude`/`lon`. Reimportar um
+  arquivo sem `id` não duplica: portal a menos de 10 m de um existente é o mesmo e mantém chaves e nível.
+- **Portais → 🔑 Chaves** → quantas chaves de cada portal você tem. Cada link *para* um portal gasta uma
+  chave dele; portal com zero chaves (em vermelho) não recebe links.
 
 Na lista de portais, os botões `−`/`+` ajustam chaves rapidamente.
 
@@ -175,9 +181,18 @@ npm test     # node --test, sem dependências
 | `tests/intersection.test.js` | teste de interseção de links: X, paralelos, portal compartilhado, T, colineares, quase-cruzamento, simetria, versão lat/lng |
 | `tests/under-field.test.js` | regra "portal sob campo": interior/exterior/vértice/aresta/degenerado; no otimizador com campo aliado, inimigo e planejado; replay de um plano completo |
 | `tests/optimizer.test.js` | fanfield, links não se cruzam, bloqueador, chaves, limite de saída, alcance por nível, raio, pares falhos, 2-opt |
-| `tests/parse-and-compliance.test.js` | extração de coordenadas; ausência de domínios da Niantic no código; CSP |
+| `tests/parse-and-compliance.test.js` | extração de coordenadas; ausência de domínios da Niantic no código; CSP; `VERSION` igual em `app.js`, `sw.js` e `package.json` |
 | `tests/bulk-import.test.js` | importação em lote: leitura de linhas (link, coordenadas, nome), prioridade `!3d`/`pll=` em `parseCoords`, links curtos recusados |
 | `tests/review-fixes.test.js` | ids `__proto__`/`constructor`/`toString` em portais, bloqueadores, done e excluded; portais na mesma posição nunca linkados; portal visitado sem links vira destino do fan |
+
+## Publicar uma versão nova
+
+O service worker serve o app de um cache por `VERSION`: publicar código sem trocar a versão não chega aos
+usuários.
+
+1. Suba a versão em `app.js` (`var VERSION = '…'`), `sw.js` (`var VERSION = 'fp-v…'`) e `package.json`.
+2. Rode `npm test` (falha se as três versões divergirem).
+3. O `git push` é feito pelo dono do repositório.
 
 ## Estrutura
 
