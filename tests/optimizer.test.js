@@ -117,3 +117,24 @@ test('rota: 2-opt nunca piora o vizinho mais próximo', () => {
   assert.ok(O._internal.routeLength(world, opt) <= O._internal.routeLength(world, nn) + 1e-6);
   assert.deepEqual([...opt].sort((a, b) => a - b), [...world.candidates].sort((a, b) => a - b));
 });
+
+test('centenas de portais no raio: limita candidatos, respeita o prazo e o plano é válido', () => {
+  const ps = [];
+  for (let i = 0; i < 300; i++) ps.push(portal('P' + i, (i * 137) % 1400 - 700, (i * 211) % 1300 - 650, { chaves: i % 4 === 0 ? 3 : 0, nivel: 4 }));
+  const input = { portals: ps, position: at(0, 0), radius: 1500, timeBudgetMs: 800 };
+  const t0 = Date.now();
+  const res = O.optimize(input);
+  const ms = Date.now() - t0;
+  assert.ok(ms < 3000, `levou ${ms} ms`);
+  assert.equal(res.inRadius, 300);
+  assert.equal(res.candidates, 30);
+  assert.ok(res.links.length > 0);
+  replay(input, res);
+});
+
+test('com poucos portais nada é cortado', () => {
+  const ps = [portal('A', 0, 0), portal('B', 200, 0), portal('C', 100, 180)];
+  const res = O.optimize({ portals: ps, position: at(0, 0), timeBudgetMs: 200 });
+  assert.equal(res.inRadius, 3);
+  assert.equal(res.candidates, 3);
+});

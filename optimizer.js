@@ -12,6 +12,7 @@
   var AP_LINK = 313;
   var AP_FIELD = 1250;
   var INF_KEYS = 1e6;
+  var MAX_CAND = 30; // portais considerados por cálculo (os demais ficam de fora do plano)
 
   function pairKey(i, j) { return i < j ? i + '|' + j : j + '|' + i; }
 
@@ -53,16 +54,27 @@
     var radius = Number(input.radius) > 0 ? Number(input.radius) : 1500;
     var candidates = [];
     pts.forEach(function (p, i) {
-      p.dist0 = input.position ? G.haversine(input.position, p) : 0;
+      p.dist0 = G.haversine(ref, p);
       if (!input.position || p.dist0 <= radius) candidates.push(i);
     });
+    // Muitos portais no raio (ex.: lista importada com centenas de pontos) deixariam a busca
+    // impraticável. Fica com os MAX_CAND mais úteis: primeiro os que têm chave, depois os mais próximos.
+    var inRadius = candidates.length;
+    var maxCand = Math.max(3, Math.floor(Number(input.maxCandidates) || MAX_CAND));
+    if (candidates.length > maxCand) {
+      candidates.sort(function (a, b) {
+        var ka = pts[a].keys > 0 ? 0 : 1, kb = pts[b].keys > 0 ? 0 : 1;
+        return ka - kb || pts[a].dist0 - pts[b].dist0;
+      });
+      candidates = candidates.slice(0, maxCand);
+    }
 
     // Portais que o usuário marcou em campo como "sob campo" (campo desconhecido pelo app).
     var forcedCovered = (input.coveredManual || []).map(function (id) { return idx[id]; })
       .filter(function (i) { return i !== undefined; });
 
     return {
-      pts: pts, idx: idx, fixed: fixed, excluded: excluded, candidates: candidates, forcedCovered: forcedCovered,
+      pts: pts, idx: idx, fixed: fixed, excluded: excluded, candidates: candidates, forcedCovered: forcedCovered, inRadius: inRadius,
       position: input.position || null,
       maxOut: Math.max(1, Math.floor(Number(input.maxOut) || 8)),
       ignoreKeys: !!input.ignoreKeys
@@ -290,9 +302,12 @@
     return arr.slice(gapAt).concat(arr.slice(0, gapAt)).map(function (o) { return o.i; });
   }
 
-  function fanfieldPlans(world, consider) {
+  function fanfieldPlans(world, consider, deadline) {
     var ids = world.candidates;
-    ids.forEach(function (anchor) {
+    // âncoras com mais chaves primeiro: são as que rendem fan; para no prazo
+    var anchors = ids.slice().sort(function (a, b) { return world.pts[b].keys - world.pts[a].keys; });
+    anchors.forEach(function (anchor, k) {
+      if (k > 0 && Date.now() >= deadline) return;
       var ord = angularOrder(world, anchor, ids);
       [ord, ord.slice().reverse()].forEach(function (o) {
         consider(simulate(world, o, { type: 'fan', anchor: anchor }), 'fanfield', o, { type: 'fan', anchor: anchor });
@@ -367,7 +382,9 @@
     }
 
     if (world.candidates.length >= 2) {
-      if (strategy === 'auto' || strategy === 'fanfield') fanfieldPlans(world, consider);
+      // no modo automático o fanfield usa no máximo metade do orçamento; o resto fica para a triangulação
+      var fanDeadline = strategy === 'auto' ? t0 + budget / 2 : deadline;
+      if (strategy === 'auto' || strategy === 'fanfield') fanfieldPlans(world, consider, fanDeadline);
       if (strategy === 'auto' || strategy === 'triangulacao') triangulationPlans(world, consider, deadline);
     }
 
@@ -376,6 +393,7 @@
       strategy: best ? best.strategy : null,
       anchor: best && best.policy.type === 'fan' ? world.pts[best.policy.anchor].id : null,
       candidates: world.candidates.length,
+      inRadius: world.inRadius,
       steps: [], links: [], fields: [], distance: 0, ap: 0,
       keysUsed: [], keysMissing: [], potentialFields: 0,
       elapsedMs: 0

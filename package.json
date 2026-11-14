@@ -1,6 +1,6 @@
 {
   "name": "field-planner",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "private": true,
   "description": "PWA offline para planejar campos pequenos a pé. Dados 100% manuais.",
   "scripts": {

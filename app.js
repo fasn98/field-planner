@@ -8,7 +8,7 @@
   'use strict';
 
   var STORE = 'fieldplanner.v1';
-  var VERSION = '1.2.2';
+  var VERSION = '1.2.3';
   // Qualquer string de 1–64 caracteres sem controle. A segurança contra "constructor"/"__proto__"
   // vem dos mapas sem protótipo; filtrar mais trocaria ids e órfãos bloqueadores/links feitos.
   var ID_RE = /^[^\u0000-\u001f\u007f]{1,64}$/;
@@ -398,7 +398,9 @@
     ]);
     out.appendChild(stats);
     var meta = (STRAT_NAMES[plan.strategy] || '–') + (plan.anchor ? ' · âncora: ' + pname(plan.anchor) : '') +
-      ' · ' + plan.candidates + ' portal(is) no raio · ' + plan.elapsedMs + ' ms';
+      ' · ' + (plan.inRadius > plan.candidates
+        ? plan.candidates + ' de ' + plan.inRadius + ' portais ' + (lastOptPos ? 'no raio ' : '') + 'considerados (com chave e mais próximos primeiro)'
+        : plan.candidates + ' portal(is) no raio') + ' · ' + plan.elapsedMs + ' ms';
     out.appendChild(el('p', { class: 'muted small', text: meta }));
 
     if (!plan.links.length) {
@@ -652,20 +654,26 @@
   /** Importa o JSON do app (ou um array de portais). Lança erro se o formato for desconhecido. */
   function importJsonText(txt) {
     var data = JSON.parse(txt);
-    var portals = Array.isArray(data) ? data : (data.portals || data.portais); // aceita a chave em português
+    // aceita as chaves portals (padrão do app), portais e pontos
+    var portals = Array.isArray(data) ? data : (data.portals || data.portais || data.pontos);
     if (!Array.isArray(portals)) throw new Error('formato desconhecido');
-    var added = 0, updated = 0, kept = 0;
+    var added = 0, updated = 0, kept = 0, autoN = nextPortalNumber();
     portals.forEach(function (raw) {
       var p = sanitizePortal(raw);
       if (!p) return;
       var hasId = raw && typeof raw.id === 'string' && ID_RE.test(raw.id);
       var ex = hasId ? portalById(p.id) : null;
-      if (ex) { Object.assign(ex, p); updated++; return; } // exportado pelo app: atualiza tudo
+      var semNome = !(raw.nome || raw.name);
+      if (ex) { // mesmo id: atualiza, mas sem trocar um nome existente por um automático
+        if (semNome) p.nome = ex.nome;
+        Object.assign(ex, p); updated++; return;
+      }
       if (!hasId) {
         // sem id (arquivo feito à mão): mesmo lugar = mesmo portal; mantém chaves/nível já ajustados
         var near = db.portals.filter(function (q) { return FPGeo.haversine(q, p) < DUP_M; })[0];
         if (near) { kept++; return; }
       }
+      if (semNome) p.nome = 'Portal ' + String(autoN++).padStart(2, '0'); // só quem entra de fato consome número
       db.portals.push(p); added++;
     });
     var ids = idSet(db.portals);
