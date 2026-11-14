@@ -114,6 +114,18 @@ Na lista de portais, os botões `−`/`+` ajustam chaves rapidamente.
 1. **Plano**: ajuste raio a pé (padrão 1500 m), links de saída por portal (padrão 8), objetivo e estratégia;
    toque em **Calcular plano**. Saem: passos ordenados ("Vá até P, faça link P→Q, P→R"), campos, AP,
    distância total, chaves consumidas por portal e chaves faltantes.
+   - **Ler o plano no mapa:** a linha amarela tracejada é a rota a pé, A → 1 → 2…, onde **A** é a posição
+     usada no cálculo (`app.js:263-270`). Os links são linhas tracejadas verde-água com o número do link
+     perto da origem. Os portais do plano mostram o rótulo "nome · 🔑N" (N = chaves cadastradas). Os campos
+     aparecem sombreados com contorno, e a sobreposição de campos escurece a área. O botão **🗺 Ver plano no
+     mapa** recolhe o painel e enquadra o plano (`app.js:275`).
+   - **Tempo estimado:** o painel mostra 🚶 a pé, 🚗 carro e 🚌 transporte. É uma estimativa, **não uma rota
+     real**: o app não consulta serviços de rotas. Cada trecho é a distância em linha reta × desvio das ruas
+     (`geo.js:240-250`, `TRAVEL`):
+     - a pé: 4,5 km/h, desvio 1,3;
+     - carro: 20 km/h, desvio 1,4, +3 min por parada para estacionar; trecho < 400 m vai a pé;
+     - transporte: 15 km/h, desvio 1,4, +10 min de espera por trecho; trecho < 1 km vai a pé;
+     - nos três: +1 min por link e +1 min por parada.
 2. **Modo em campo**: o passo atual em destaque, distância e rumo até o portal, e dois botões grandes:
    - **✓ Concluído** — registra o link como feito, desconta 1 chave do destino, recalcula.
    - **✕ Falhou** — pergunta o motivo: *bloqueado por outro link* (você cadastra o bloqueador),
@@ -222,6 +234,7 @@ npm test     # node --test, sem dependências
 | `tests/under-field.test.js` | regra "portal sob campo": interior/exterior/vértice/aresta/degenerado; no otimizador com campo aliado, inimigo e planejado; replay de um plano completo |
 | `tests/simulation.test.js` | simulação sem chaves e lista de farm, área do campo, objetivo MU, corte de candidatos por distância |
 | `tests/multilayer.test.js` | multicamada: uma camada por portal central encaixado, ordem do miolo para fora, sobreposição, base A–B, objetivo MU |
+| `tests/travel.test.js` | tempo estimado a pé, de carro e de transporte: trechos curtos a pé, trecho longo, sem trechos |
 | `tests/optimizer.test.js` | fanfield, links não se cruzam, bloqueador, chaves, limite de saída, alcance por nível, raio, pares falhos, 2-opt |
 | `tests/parse-and-compliance.test.js` | extração de coordenadas; ausência de domínios da Niantic no código; CSP; `VERSION` igual em `app.js`, `sw.js` e `package.json` |
 | `tests/bulk-import.test.js` | importação em lote: leitura de linhas (link, coordenadas, nome), prioridade `!3d`/`pll=` em `parseCoords`, links curtos recusados |

@@ -2,6 +2,13 @@
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Datas no formato AAAA-MM-DD.
 
+## [1.4.0] — 2026-11-14
+### Adicionado
+- Plano no mapa: rota amarela tracejada A → 1 → 2… (A = posição usada no cálculo), links numerados, rótulo "nome · 🔑N" nos portais do plano e campos com contorno e sombra (`app.js:232-270`, `app.js:207`).
+- Botão "Ver plano no mapa": recolhe o painel e enquadra o plano (`app.js:275`).
+- Tempo estimado a pé, de carro e de transporte público, calculado localmente a partir da linha reta × desvio das ruas, com +1 min por link e por parada (`geo.js:240-263`). Não é rota real: o app não consulta serviços de rotas.
+- `tests/travel.test.js` (81 testes no total).
+
 ## [1.3.1] — 2026-11-14
 ### Alterado
 - Texto de conformidade na aba Ajustes alinhado à política do README: portais inseridos pelo usuário (digitados, links colados ou arquivos importados); o plano só simula. **Não revisado:** mudança só de texto.
