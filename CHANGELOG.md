@@ -2,6 +2,10 @@
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Datas no formato AAAA-MM-DD.
 
+## [1.6.1] — 2026-11-14
+### Corrigido
+- Celular: a barra "Salvar posição" do modo mover podia ficar fora da tela quando a página estava ampliada (zoom do navegador ao tocar nos campos). Campos agora usam fonte de 16 px, a página não amplia (`maximum-scale=1`; o mapa continua com zoom normal) e o modo mover desfaz a ampliação ao começar.
+
 ## [1.6.0] — 2026-11-14
 ### Adicionado
 - **Mover portal no mapa**: no diálogo do portal, "📍 Mover no mapa" abre um pino que dá para arrastar, ou basta tocar no lugar certo. A barra mostra a distância do ajuste e tem Cancelar / Salvar posição. Serve para corrigir posições de importações cruas (prints de mapa).

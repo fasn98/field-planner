@@ -8,7 +8,7 @@
   'use strict';
 
   var STORE = 'fieldplanner.v1';
-  var VERSION = '1.6.0';
+  var VERSION = '1.6.1';
   // Qualquer string de 1–64 caracteres sem controle. A segurança contra "constructor"/"__proto__"
   // vem dos mapas sem protótipo; filtrar mais trocaria ids e órfãos bloqueadores/links feitos.
   var ID_RE = /^[^\u0000-\u001f\u007f]{1,64}$/;
@@ -649,8 +649,16 @@
   // Mover portal no mapa: arrastar o marcador ou tocar no ponto certo.
   // Útil para corrigir posições vindas de importação crua (print de mapa).
   var moving = null;
+  function resetPageZoom() {
+    var vv = window.visualViewport, meta = document.querySelector('meta[name=viewport]');
+    if (!vv || !meta || vv.scale <= 1.01) return;
+    var c = meta.getAttribute('content');
+    meta.setAttribute('content', c.replace(/,?\s*maximum-scale=[^,]*/, '') + ', maximum-scale=1');
+    setTimeout(function () { meta.setAttribute('content', c); }, 300);
+  }
   function startMove(p) {
     endMove(false); // nunca dois pinos ao mesmo tempo
+    resetPageZoom(); // página ampliada no celular deixa a barra de salvar fora da tela
     var orig = { lat: p.lat, lng: p.lng };
     var mk = L.marker([p.lat, p.lng], { draggable: true, autoPan: true, zIndexOffset: 2000,
       icon: L.divIcon({ className: '', html: '<div class="move-pin"></div>', iconSize: [28, 28], iconAnchor: [14, 14] }) }).addTo(map);
