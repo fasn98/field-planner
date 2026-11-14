@@ -2,6 +2,23 @@
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Datas no formato AAAA-MM-DD.
 
+## [1.3.0] — 2026-11-14
+### Adicionado
+- "Simular sem chaves" em Ajustes: mostra o melhor plano pela posição dos portais e a lista de farm (chaves que faltam por portal, com total). O modo em campo fica desabilitado na simulação (`app.js:354`, `app.js:400`).
+- Objetivo "Máx. área (≈ MU)": a área decide e a caminhada só desempata; o plano mostra a área por campo, por link e o total (`optimizer.js:267`).
+- Estratégia "Multicamada": base A–B e cadeia de portais centrais encaixados, executada do miolo para fora; compete no modo automático (`optimizer.js:386`).
+- O raio a pé vai até 100 km, antes 20 km (`app.js:378`).
+- `tests/simulation.test.js` e `tests/multilayer.test.js`; novos testes de geodésica em `tests/intersection.test.js` (77 testes no total).
+
+### Alterado
+- Orçamento do modo automático: 1/3 fanfield, 1/3 multicamada, resto triangulação (`optimizer.js:461-462`).
+
+### Corrigido
+- Geometria exata para links longos: a projeção passou a ser gnomônica (geodésicas viram retas) e o alcance é medido por haversine (`geo.js:36-50`). Antes, cruzamentos de links de dezenas de km podiam ser decididos errado. Portais a mais de ~80° da referência ficam fora da conta (`optimizer.js:16`).
+
+### Conhecido
+- A área serve como estimativa de MU só dentro de uma mesma região; a densidade populacional varia.
+
 ## [1.2.3] — 2026-11-14
 ### Adicionado
 - O import de JSON aceita a chave `"pontos"`; portal sem nome recebe "Portal NN" quando é adicionado. Atualizar por `id` preserva o nome existente (`app.js:657`, `app.js:668-676`).

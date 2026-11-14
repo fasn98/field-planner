@@ -72,6 +72,21 @@ tela inicial" instala o app e ele abre sem internet (os tiles já visualizados f
 > primeiro, `optimizer.js:15`); o plano mostra "N de M considerados". Coordenadas estimadas de prints têm
 > erro de dezenas de metros: confira os portais do campo antes de sair. (Os próprios arquivos de exemplo declaram precisão de 10–30 m e de 20–80 m.)
 
+### Simulação e lista de farm
+
+- **Ajustes → Simular sem chaves** → calcula o melhor plano que a posição dos portais permite, ignorando
+  as chaves que você tem. O plano mostra um aviso de simulação e a **Lista de farm**: quantas chaves
+  faltam de cada portal, com o total (`app.js:354`).
+- Na simulação, os candidatos são cortados só por distância. O **modo em campo fica desabilitado**
+  (`app.js:400`): desligue a simulação para sair a campo.
+- **Ajustes → Objetivo → Máx. área (≈ MU)** → a área decide o plano. A área é só um proxy do MU: o MU
+  real depende da densidade populacional, que o app não conhece. Compare áreas apenas dentro da mesma
+  região. Cada camada conta: campos empilhados somam a área de todos.
+- **Nível de portal neutro:** informe o nível que o portal terá depois que você o capturar e montar, não o
+  atual. Um agente sozinho pode colocar no máximo 1×R8, 1×R7, 2×R6, 2×R5 e 4×R4 (para completar 8: R8, R7,
+  2×R6, 2×R5 e 2×R4), média 5,6: informe **L5**, que já alcança 100 km (160 m × 5⁴, `geo.js` `linkRange`).
+  Com ajuda de outros agentes o portal sobe de nível. L1 alcança só 160 m.
+
 ### Cadastrar portais
 
 - **Toque longo no mapa** → formulário já com a coordenada.
@@ -127,7 +142,7 @@ Roda num **Web Worker** (`worker.js` → `optimizer.js`), com orçamento de ~1,5
 **Campos**: ao fechar triângulos, cria no máximo um campo de cada lado do link — o de maior área.
 AP: 313 por link, 1250 por campo (captura e deploy não entram).
 
-**Estratégias** (em "Automática" roda as duas e fica com a melhor):
+**Estratégias** (em "Automática" roda as três e fica com a melhor):
 
 - **Fanfield** — cada portal é testado como âncora; os demais são ordenados por ângulo em torno dela
   (começando após o maior vão) nos dois sentidos; em cada portal: link para a âncora e depois para os
@@ -135,9 +150,21 @@ AP: 313 por link, 1250 por campo (captura e deploy não entram).
 - **Triangulação gulosa** — ordem de visita semente por vizinho-mais-próximo + 2-opt; em cada portal,
   escolhe repetidamente o link válido que mais fecha campos. Para ≤ 7 portais testa **todas** as ordens;
   de 8 a 12 faz busca local (trocas/reinserções) até o prazo; acima de 12 usa só a semente.
+- **Multicamada** — escolhe uma base A–B e, de cada lado, a maior cadeia de portais centrais encaixados
+  (C1 ⊃ … ⊃ Cn, por programação dinâmica; no objetivo de área o peso é a área). Executa do miolo para
+  fora: A→B, depois Cn→A/B, …, C1→A/B. Cada camada empilha um campo sobre o anterior.
+
+**Orçamento do automático**: 1/3 do tempo para o fanfield, 1/3 para a multicamada e o resto para a
+triangulação (`optimizer.js:461-462`). Cada cálculo considera no máximo 30 candidatos (`optimizer.js:15`).
 
 **Objetivos**: *Máx. campos* (empate → menos caminhada), *Máx. AP*, *Mín. distância* (maximiza AP por
-metro caminhado — minimizar distância pura daria "não andar").
+metro caminhado — minimizar distância pura daria "não andar") e *Máx. área (≈ MU)* (a área decide; a
+caminhada só desempata).
+
+**Geometria**: a projeção é gnomônica, centrada na referência, e transforma geodésicas em retas
+(`geo.js:36-50`). Os testes de cruzamento e de "sob campo" valem em escala de dezenas ou centenas de km.
+O alcance e a distância mínima entre portais usam haversine. O raio a pé vai até 100 km
+(`app.js:378`).
 
 **Rota a pé**: distância haversine; a ordem dos passos é a da melhor simulação (em fielding a ordem
 importa, então a rota não é reordenada depois).
@@ -147,8 +174,8 @@ junto com quantos campos a mais isso renderia.
 
 ### Limitações conhecidas
 
-- Geodésicas aproximadas por retas numa projeção local — ótimo para áreas a pé (poucos km), não para
-  campos de centenas de km.
+- Portais a mais de ~80° (≈ 8900 km) da referência ficam fora da conta; para links dentro de uma região
+  normal isso não importa.
 - Campos inimigos são inferidos a partir de triângulos de bloqueadores cadastrados; um triângulo de links
   sem campo real seria tratado como campo.
 - Alcance não considera Link Amps nem outros mods.
@@ -191,8 +218,10 @@ npm test     # node --test, sem dependências
 
 | Arquivo | Cobre |
 | :- | :- |
-| `tests/intersection.test.js` | teste de interseção de links: X, paralelos, portal compartilhado, T, colineares, quase-cruzamento, simetria, versão lat/lng |
+| `tests/intersection.test.js` | teste de interseção de links (inclui geodésicas de dezenas de km): X, paralelos, portal compartilhado, T, colineares, quase-cruzamento, simetria, versão lat/lng |
 | `tests/under-field.test.js` | regra "portal sob campo": interior/exterior/vértice/aresta/degenerado; no otimizador com campo aliado, inimigo e planejado; replay de um plano completo |
+| `tests/simulation.test.js` | simulação sem chaves e lista de farm, área do campo, objetivo MU, corte de candidatos por distância |
+| `tests/multilayer.test.js` | multicamada: uma camada por portal central encaixado, ordem do miolo para fora, sobreposição, base A–B, objetivo MU |
 | `tests/optimizer.test.js` | fanfield, links não se cruzam, bloqueador, chaves, limite de saída, alcance por nível, raio, pares falhos, 2-opt |
 | `tests/parse-and-compliance.test.js` | extração de coordenadas; ausência de domínios da Niantic no código; CSP; `VERSION` igual em `app.js`, `sw.js` e `package.json` |
 | `tests/bulk-import.test.js` | importação em lote: leitura de linhas (link, coordenadas, nome), prioridade `!3d`/`pll=` em `parseCoords`, links curtos recusados |
