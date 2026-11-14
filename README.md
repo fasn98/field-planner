@@ -104,6 +104,7 @@ tela inicial" instala o app e ele abre sem internet (os tiles já visualizados f
 - **Ajustes → Importar/Exportar JSON** (formato abaixo).
   Aceita a chave `"portals"` ou `"portais"` e `lat`/`lng` ou `latitude`/`longitude`/`lon`. A chave de lista também pode ser `"pontos"`; portal sem nome vira `Portal NN`. Reimportar um
   arquivo sem `id` não duplica: portal a menos de 10 m de um existente é o mesmo e mantém chaves e nível.
+- **Ajustes → Desfazer última importação** remove os portais adicionados na última importação (com bloqueadores e links feitos ligados a eles). Importações com mais de 300 pontos pedem confirmação antes.
 - **Portais → 🔑 Chaves** → quantas chaves de cada portal você tem. Cada link *para* um portal gasta uma
   chave dele; portal com zero chaves (em vermelho) não recebe links.
 

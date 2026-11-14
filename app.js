@@ -8,7 +8,7 @@
   'use strict';
 
   var STORE = 'fieldplanner.v1';
-  var VERSION = '1.4.0';
+  var VERSION = '1.5.0';
   // Qualquer string de 1–64 caracteres sem controle. A segurança contra "constructor"/"__proto__"
   // vem dos mapas sem protótipo; filtrar mais trocaria ids e órfãos bloqueadores/links feitos.
   var ID_RE = /^[^\u0000-\u001f\u007f]{1,64}$/;
@@ -24,7 +24,7 @@
 
   function emptyDb() {
     return {
-      version: 1, portals: [], blockers: [], done: [], excluded: [], coveredManual: [],
+      version: 1, portals: [], blockers: [], done: [], excluded: [], coveredManual: [], lastImport: null,
       settings: { radius: 1500, maxOut: 8, objective: 'campos', strategy: 'auto', simulate: false }
     };
   }
@@ -41,6 +41,10 @@
       d.done = sanitizePairs(d.done, ids);
       d.excluded = sanitizePairs(d.excluded, ids);
       d.coveredManual = d.coveredManual.filter(function (x) { return typeof x === 'string' && ids[x]; });
+      var li = d.lastImport;
+      d.lastImport = li && Array.isArray(li.ids) ? { ts: Number(li.ts) || 0, label: String(li.label || '').slice(0, 40),
+        ids: li.ids.filter(function (x) { return typeof x === 'string' && ids[x]; }) } : null;
+      if (d.lastImport && !d.lastImport.ids.length) d.lastImport = null;
       return d;
     } catch (e) {
       console.warn('[FP] falha ao ler dados locais', e);
@@ -304,6 +308,7 @@
     renderBlockerList();
     renderPlanPanel();
     renderField();
+    renderUndoImport();
     $('#doneInfo').textContent = db.done.length + ' link(s) marcados como feitos · ' + db.excluded.length + ' par(es) falho(s)' +
       (db.coveredManual.length ? ' · ' + db.coveredManual.length + ' portal(is) marcados sob campo' : '');
   }
@@ -610,11 +615,8 @@
       var id = editing.id, name = editing.nome;
       confirmDialog('Excluir portal', 'Excluir “' + name + '” e links associados?').then(function (ok) {
         if (!ok) return;
-        db.portals = db.portals.filter(function (p) { return p.id !== id; });
-        db.blockers = db.blockers.filter(function (b) { return b.portalA !== id && b.portalB !== id; });
-        db.done = db.done.filter(function (d) { return d.from !== id && d.to !== id; });
-        db.excluded = db.excluded.filter(function (d) { return d.from !== id && d.to !== id; });
-        db.coveredManual = db.coveredManual.filter(function (x) { return x !== id; });
+        var gone = Object.create(null); gone[id] = true;
+        removePortals(gone);
         save();
         invalidatePlan();
       });
@@ -727,11 +729,23 @@
 
   /** Importa o JSON do app (ou um array de portais). Lança erro se o formato for desconhecido. */
   function importJsonText(txt) {
-    var data = JSON.parse(txt);
-    // aceita as chaves portals (padrão do app), portais e pontos
-    var portals = Array.isArray(data) ? data : (data.portals || data.portais || data.pontos);
-    if (!Array.isArray(portals)) throw new Error('formato desconhecido');
-    var added = 0, updated = 0, kept = 0, autoN = nextPortalNumber();
+    return Promise.resolve().then(function () {
+      var data = JSON.parse(txt);
+      // aceita as chaves portals (padrão do app), portais e pontos
+      var portals = Array.isArray(data) ? data : (data.portals || data.portais || data.pontos);
+      if (!Array.isArray(portals)) throw new Error('formato desconhecido');
+      if (portals.length <= BIG_IMPORT) return applyImport(data, portals);
+      return confirmDialog('Importação grande', 'O arquivo tem ' + fmtNum(portals.length) + ' pontos. ' +
+        'Listas detectadas automaticamente em prints costumam trazer ruído (pontos em grade, na água, na borda da imagem). ' +
+        'Você pode desfazer depois em Ajustes → Desfazer última importação.').then(function (ok) {
+        if (ok) applyImport(data, portals); else toast('Importação cancelada');
+      });
+    });
+  }
+
+  function applyImport(data, portals) {
+    var added = 0, updated = 0, kept = 0, autoN = nextPortalNumber(), addedIds = [];
+    var near = nearIndex(db.portals);
     portals.forEach(function (raw) {
       var p = sanitizePortal(raw);
       if (!p) return;
@@ -744,12 +758,12 @@
       }
       if (!hasId) {
         // sem id (arquivo feito à mão): mesmo lugar = mesmo portal; mantém chaves/nível já ajustados
-        var near = db.portals.filter(function (q) { return FPGeo.haversine(q, p) < DUP_M; })[0];
-        if (near) { kept++; return; }
+        if (near.find(p)) { kept++; return; }
       }
       if (semNome) p.nome = 'Portal ' + String(autoN++).padStart(2, '0'); // só quem entra de fato consome número
-      db.portals.push(p); added++;
+      db.portals.push(p); near.add(p); addedIds.push(p.id); added++;
     });
+    recordImport(addedIds, 'arquivo JSON');
     var ids = idSet(db.portals);
     var nb = 0, have = Object.create(null);
     db.blockers.forEach(function (b) { have[blockerKey(b)] = true; have['id:' + b.id] = true; });
@@ -788,6 +802,46 @@
   /* ------------------------------------------------------------ */
 
   var DUP_M = 10; // portais a menos de 10 m são tratados como o mesmo
+  var BIG_IMPORT = 300; // acima disso, pede confirmação antes de gravar
+
+  /**
+   * Índice espacial simples (grade de ~22 m) para achar portais a menos de DUP_M sem comparar
+   * cada ponto com todos os outros: importar milhares de pontos não trava a tela.
+   */
+  function nearIndex(list) {
+    var CELL = 0.0002, grid = Object.create(null);
+    var key = function (la, ln) { return Math.floor(la / CELL) + ':' + Math.floor(ln / CELL); };
+    var idx = {
+      add: function (p) { var k = key(p.lat, p.lng); (grid[k] = grid[k] || []).push(p); },
+      find: function (p) {
+        var r = Math.floor(p.lat / CELL), c = Math.floor(p.lng / CELL);
+        // em longitude a célula encolhe com a latitude (22 m × cos): alarga a busca para cobrir DUP_M
+        var span = Math.max(1, Math.ceil(DUP_M / (CELL * 111320 * Math.max(Math.cos(p.lat * Math.PI / 180), 0.01))));
+        for (var i = -1; i <= 1; i++) for (var j = -span; j <= span; j++) {
+          var b = grid[(r + i) + ':' + (c + j)];
+          if (b) for (var k = 0; k < b.length; k++) if (FPGeo.haversine(b[k], p) < DUP_M) return b[k];
+        }
+        return null;
+      }
+    };
+    (list || []).forEach(idx.add);
+    return idx;
+  }
+
+  /** Remove portais (conjunto de ids) e tudo que aponta para eles. */
+  function removePortals(gone) {
+    db.portals = db.portals.filter(function (p) { return !gone[p.id]; });
+    db.blockers = db.blockers.filter(function (b) { return !gone[b.portalA] && !gone[b.portalB]; });
+    db.done = db.done.filter(function (d) { return !gone[d.from] && !gone[d.to]; });
+    db.excluded = db.excluded.filter(function (d) { return !gone[d.from] && !gone[d.to]; });
+    db.coveredManual = db.coveredManual.filter(function (x) { return !gone[x]; });
+    if (db.lastImport) db.lastImport.ids = db.lastImport.ids.filter(function (x) { return !gone[x]; });
+    if (db.lastImport && !db.lastImport.ids.length) db.lastImport = null;
+  }
+
+  function recordImport(ids, label) {
+    if (ids.length) db.lastImport = { ts: Date.now(), label: label, ids: ids };
+  }
   var bulkRows = [];
   var bulkForm = $('#bulkForm').elements;
   for (var bl = 1; bl <= 8; bl++) bulkForm.nivel.appendChild(el('option', { value: String(bl), text: 'L' + bl }));
@@ -812,7 +866,7 @@
         try { JSON.parse(t); } catch (err) { t = null; }
         if (t !== null) {
           $('#bulkDlg').close('cancel');
-          try { importJsonText(txt); } catch (err) { toastError('JSON inválido: ' + err.message); }
+          importJsonText(txt).catch(function (err) { toastError('JSON inválido: ' + err.message); });
           return;
         }
       }
@@ -829,19 +883,15 @@
   function parseBulkText() {
     var parsed = FPGeo.parseBulk(bulkForm.text.value, 2001);
     if (parsed.length > 2000) { toast('Máximo de 2000 linhas por importação; o resto foi ignorado', 4000); parsed = parsed.slice(0, 2000); }
-    var accepted = [];
+    var saved = nearIndex(db.portals), accepted = nearIndex([]);
     bulkRows = parsed.map(function (r) {
       if (r.erro) return r;
-      var dup = null;
-      for (var i = 0; i < db.portals.length && !dup; i++) {
-        if (FPGeo.haversine(r, db.portals[i]) < DUP_M) dup = 'já cadastrado: ' + db.portals[i].nome;
-      }
-      for (var j = 0; j < accepted.length && !dup; j++) {
-        if (FPGeo.haversine(r, accepted[j]) < DUP_M) dup = 'repetido da linha ' + accepted[j].linha;
-      }
+      var hit = saved.find(r), dup = null;
+      if (hit) dup = 'já cadastrado: ' + hit.nome;
+      else if ((hit = accepted.find(r))) dup = 'repetido da linha ' + hit.linha;
       r.dup = dup;
       r.use = !dup;
-      if (!dup) accepted.push(r);
+      if (!dup) accepted.add(r);
       return r;
     });
     // Sem nome na linha: rótulo automático. O que importa é a posição; o jogador associa no jogo.
@@ -923,10 +973,34 @@
     });
     bulkRows = [];
     if (!added.length) return;
+    recordImport(added.map(function (p) { return p.id; }), 'lista de links');
     save();
     map.fitBounds(L.latLngBounds(added.map(function (p) { return [p.lat, p.lng]; })).pad(0.2));
     invalidatePlan();
     toast(added.length + ' portal(is) importado(s). Ajuste nível e chaves na lista.', 4000);
+  });
+
+  function renderUndoImport() {
+    var b = $('#undoImportBtn'), li = db.lastImport;
+    b.disabled = !li;
+    b.textContent = li ? 'Desfazer última importação (' + fmtNum(li.ids.length) + ' portais, ' + li.label + ')' : 'Desfazer última importação';
+  }
+  $('#undoImportBtn').addEventListener('click', function () {
+    var li = db.lastImport;
+    if (!li) return;
+    confirmDialog('Desfazer importação', 'Remover os ' + fmtNum(li.ids.length) + ' portais adicionados na última importação (' + li.label + ', ' +
+      new Date(li.ts).toLocaleString('pt-BR') + ')? Bloqueadores e links feitos ligados a eles também saem, e chaves e níveis ajustados neles se perdem. ' +
+      'Portais que já existiam e foram atualizados pelo arquivo, e configurações vindas dele, não são revertidos.').then(function (ok) {
+      if (!ok) return;
+      var gone = Object.create(null);
+      li.ids.forEach(function (id) { gone[id] = true; });
+      var n = li.ids.length;
+      removePortals(gone);
+      db.lastImport = null;
+      save();
+      invalidatePlan();
+      toast(fmtNum(n) + ' portal(is) removido(s)');
+    });
   });
 
   $('#wipeBtn').addEventListener('click', function () {

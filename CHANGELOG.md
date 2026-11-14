@@ -2,6 +2,14 @@
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Datas no formato AAAA-MM-DD.
 
+## [1.5.0] — 2026-11-14
+### Adicionado
+- **Desfazer última importação** (Ajustes): remove os portais adicionados na última importação (arquivo JSON ou lista de links), com bloqueadores e links feitos ligados a eles. Atualizações de portais existentes e configurações vindas do arquivo não são revertidas. Só 1 nível.
+- Confirmação antes de importar arquivos com mais de 300 pontos, com aviso sobre ruído em listas detectadas de prints.
+
+### Alterado
+- Checagem de duplicados (import JSON e lista de links) usa um índice espacial em grade (~22 m, ajustado à latitude) em vez de comparar todos com todos: 12 mil pontos são gravados em ~0,5 s.
+
 ## [1.4.0] — 2026-11-14
 ### Adicionado
 - Plano no mapa: rota amarela tracejada A → 1 → 2… (A = posição usada no cálculo), links numerados, rótulo "nome · 🔑N" nos portais do plano e campos com contorno e sombra (`app.js:232-270`, `app.js:207`).
