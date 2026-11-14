@@ -115,6 +115,11 @@
   .lbl.cur { background: #fff; color: #000; }
   .lbl.done { background: var(--muted); }
   .me { width: 18px; height: 18px; border-radius: 50%; background: #58a6ff; border: 3px solid #fff; box-shadow: 0 0 0 6px rgba(88,166,255,.25); }
+  .bulk-row { display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; align-items: center; }
+  .bulk-row input[type=checkbox] { width: 22px; min-height: 22px; }
+  .bulk-row .meta { grid-column: 2; font-size: 12px; color: var(--muted); }
+  .bulk-row .meta.bad { color: var(--bad); } .bulk-row .meta.warn { color: var(--warn); }
+  code { font-size: 12px; background: var(--bg); padding: 1px 4px; border-radius: 4px; word-break: break-all; }
   .fab { position: fixed; right: 12px; z-index: 1000; width: 52px; height: 52px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); font-size: 22px; }
 </style>
 </head>
@@ -172,6 +177,7 @@
         <button id="addPortalBtn" class="btn primary grow">+ Portal</button>
         <button id="pasteBtn" class="btn grow">Colar link</button>
       </div>
+      <div class="row"><button id="bulkBtn" class="btn grow">Importar lista de links</button></div>
       <input id="search" type="search" placeholder="Buscar portal…" aria-label="Buscar portal">
       <p class="muted small">Toque longo no mapa também adiciona um portal no ponto.</p>
       <ul id="portalList" class="list"></ul>
@@ -290,6 +296,34 @@
     <div class="row"><span class="spacer"></span>
       <button value="cancel" class="btn ghost" formnovalidate>Cancelar</button>
       <button value="ok" class="btn primary">Continuar</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Diálogo: importação em lote -->
+<dialog id="bulkDlg">
+  <form method="dialog" class="stack" id="bulkForm">
+    <h2>Importar lista de portais</h2>
+    <p class="muted small">Uma linha por portal com um link do Google Maps ou coordenadas. O nome é opcional:
+      sem nome, o portal vira “Portal 01”, “Portal 02”… — o que importa é a posição.
+      Ex.: <code>https://www.google.com/maps/place/…</code> ou <code>Masp; -23.5614, -46.6558</code>.
+      Os links nunca são abertos: só lemos as coordenadas do texto.</p>
+    <p class="muted small">Links curtos (<code>maps.app.goo.gl</code>) não trazem coordenadas. Abra o link no navegador e copie o endereço completo, ou toque e segure no mapa do Google Maps e copie as coordenadas.</p>
+    <textarea name="text" rows="6" placeholder="https://www.google.com/maps/…  (um link por linha)"></textarea>
+    <div class="row">
+      <button type="button" id="bulkFileBtn" class="btn sm grow">Abrir arquivo (.txt, .csv, .json)</button>
+      <input id="bulkFile" type="file" accept=".txt,.csv,.json,text/plain,text/csv,application/json" hidden>
+      <button type="button" id="bulkParseBtn" class="btn sm primary grow">Ler linhas</button>
+    </div>
+    <div class="grid2">
+      <label class="f">Nível padrão<select name="nivel"></select></label>
+      <label class="f">Chaves padrão<input name="chaves" type="number" min="0" max="999" step="1" inputmode="numeric" value="0"></label>
+    </div>
+    <p class="muted small" id="bulkSummary"></p>
+    <ul class="list" id="bulkPreview"></ul>
+    <div class="row"><span class="spacer"></span>
+      <button value="cancel" class="btn ghost" formnovalidate>Cancelar</button>
+      <button value="save" id="bulkSave" class="btn primary" disabled>Importar</button>
     </div>
   </form>
 </dialog>

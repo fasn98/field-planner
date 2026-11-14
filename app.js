@@ -8,7 +8,7 @@
   'use strict';
 
   var STORE = 'fieldplanner.v1';
-  var VERSION = '1.1.2';
+  var VERSION = '1.2.0';
   // Qualquer string de 1–64 caracteres sem controle. A segurança contra "constructor"/"__proto__"
   // vem dos mapas sem protótipo; filtrar mais trocaria ids e órfãos bloqueadores/links feitos.
   var ID_RE = /^[^\u0000-\u001f\u007f]{1,64}$/;
@@ -621,46 +621,195 @@
     e.target.value = '';
     if (!file) return;
     if (file.size > 5 * 1024 * 1024) { toast('Arquivo grande demais (máx. 5 MB)'); return; }
+    file.text().then(importJsonText).catch(function (err) { toast('JSON inválido: ' + err.message, 4000); });
+  });
+
+  /** Importa o JSON do app (ou um array de portais). Lança erro se o formato for desconhecido. */
+  function importJsonText(txt) {
+    var data = JSON.parse(txt);
+    var portals = Array.isArray(data) ? data : data.portals;
+    if (!Array.isArray(portals)) throw new Error('formato desconhecido');
+    var added = 0, updated = 0;
+    portals.map(sanitizePortal).filter(Boolean).forEach(function (p) {
+      var ex = portalById(p.id);
+      if (ex) { Object.assign(ex, p); updated++; } else { db.portals.push(p); added++; }
+    });
+    var ids = idSet(db.portals);
+    var nb = 0, have = Object.create(null);
+    db.blockers.forEach(function (b) { have[blockerKey(b)] = true; have['id:' + b.id] = true; });
+    (Array.isArray(data.blockers) ? data.blockers : []).forEach(function (b) {
+      var s = sanitizeBlocker(b, ids);
+      if (!s || have[blockerKey(s)] || have['id:' + s.id]) return;
+      have[blockerKey(s)] = have['id:' + s.id] = true;
+      db.blockers.push(s); nb++;
+    });
+    ['done', 'excluded'].forEach(function (k) {
+      db[k] = db[k].concat(sanitizePairs(data[k], ids, db[k]));
+    });
+    if (Array.isArray(data.coveredManual)) data.coveredManual.forEach(function (x) {
+      if (typeof x === 'string' && ids[x] && db.coveredManual.indexOf(x) < 0) db.coveredManual.push(x);
+    });
+    if (data.settings && typeof data.settings === 'object') {
+      var st = data.settings;
+      db.settings = {
+        radius: clampInt(st.radius, 100, 20000, db.settings.radius),
+        maxOut: clampInt(st.maxOut, 1, 40, db.settings.maxOut),
+        objective: ['campos', 'ap', 'distancia'].indexOf(st.objective) >= 0 ? st.objective : db.settings.objective,
+        strategy: ['auto', 'fanfield', 'triangulacao'].indexOf(st.strategy) >= 0 ? st.strategy : db.settings.strategy
+      };
+      cfg.radius.value = db.settings.radius; cfg.maxOut.value = db.settings.maxOut;
+      cfg.objective.value = db.settings.objective; cfg.strategy.value = db.settings.strategy;
+    }
+    save();
+    if (db.portals.length) map.fitBounds(L.latLngBounds(db.portals.map(function (p) { return [p.lat, p.lng]; })).pad(0.2));
+    invalidatePlan();
+    toast('Importado: ' + added + ' novo(s), ' + updated + ' atualizado(s), ' + nb + ' bloqueador(es)', 4000);
+  }
+
+  /* ------------------------------------------------------------ */
+  /* Importação em lote: uma linha por portal (nome + link/coords). */
+  /* ------------------------------------------------------------ */
+
+  var DUP_M = 10; // portais a menos de 10 m são tratados como o mesmo
+  var bulkRows = [];
+  var bulkForm = $('#bulkForm').elements;
+  for (var bl = 1; bl <= 8; bl++) bulkForm.nivel.appendChild(el('option', { value: String(bl), text: 'L' + bl }));
+
+  $('#bulkBtn').addEventListener('click', function () {
+    bulkForm.text.value = '';
+    bulkRows = [];
+    renderBulk();
+    $('#bulkDlg').returnValue = '';
+    $('#bulkDlg').showModal();
+  });
+  $('#bulkFileBtn').addEventListener('click', function () { $('#bulkFile').click(); });
+  $('#bulkFile').addEventListener('change', function (e) {
+    var file = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { toast('Arquivo grande demais (máx. 5 MB)'); return; }
     file.text().then(function (txt) {
-      var data = JSON.parse(txt);
-      var portals = Array.isArray(data) ? data : data.portals;
-      if (!Array.isArray(portals)) throw new Error('formato desconhecido');
-      var added = 0, updated = 0;
-      portals.map(sanitizePortal).filter(Boolean).forEach(function (p) {
-        var ex = portalById(p.id);
-        if (ex) { Object.assign(ex, p); updated++; } else { db.portals.push(p); added++; }
-      });
-      var ids = idSet(db.portals);
-      var nb = 0, have = Object.create(null);
-      db.blockers.forEach(function (b) { have[blockerKey(b)] = true; have['id:' + b.id] = true; });
-      (Array.isArray(data.blockers) ? data.blockers : []).forEach(function (b) {
-        var s = sanitizeBlocker(b, ids);
-        if (!s || have[blockerKey(s)] || have['id:' + s.id]) return;
-        have[blockerKey(s)] = have['id:' + s.id] = true;
-        db.blockers.push(s); nb++;
-      });
-      ['done', 'excluded'].forEach(function (k) {
-        db[k] = db[k].concat(sanitizePairs(data[k], ids, db[k]));
-      });
-      if (Array.isArray(data.coveredManual)) data.coveredManual.forEach(function (x) {
-        if (typeof x === 'string' && ids[x] && db.coveredManual.indexOf(x) < 0) db.coveredManual.push(x);
-      });
-      if (data.settings && typeof data.settings === 'object') {
-        var st = data.settings;
-        db.settings = {
-          radius: clampInt(st.radius, 100, 20000, db.settings.radius),
-          maxOut: clampInt(st.maxOut, 1, 40, db.settings.maxOut),
-          objective: ['campos', 'ap', 'distancia'].indexOf(st.objective) >= 0 ? st.objective : db.settings.objective,
-          strategy: ['auto', 'fanfield', 'triangulacao'].indexOf(st.strategy) >= 0 ? st.strategy : db.settings.strategy
-        };
-        cfg.radius.value = db.settings.radius; cfg.maxOut.value = db.settings.maxOut;
-        cfg.objective.value = db.settings.objective; cfg.strategy.value = db.settings.strategy;
+      var t = txt.trim();
+      // JSON do próprio app (ou array de portais): usa o import completo
+      if (t[0] === '{' || t[0] === '[') {
+        try { JSON.parse(t); } catch (err) { t = null; }
+        if (t !== null) {
+          $('#bulkDlg').close('cancel');
+          try { importJsonText(txt); } catch (err) { toast('JSON inválido: ' + err.message, 4000); }
+          return;
+        }
       }
-      save();
-      if (db.portals.length) map.fitBounds(L.latLngBounds(db.portals.map(function (p) { return [p.lat, p.lng]; })).pad(0.2));
-      invalidatePlan();
-      toast('Importado: ' + added + ' novo(s), ' + updated + ' atualizado(s), ' + nb + ' bloqueador(es)', 4000);
-    }).catch(function (err) { toast('JSON inválido: ' + err.message, 4000); });
+      bulkForm.text.value = txt;
+      parseBulkText();
+    }).catch(function (err) { toast('Não foi possível ler o arquivo: ' + err.message, 4000); });
+  });
+  $('#bulkParseBtn').addEventListener('click', parseBulkText);
+  // Enter em qualquer campo de uma linha não submete: o botão padrão do form é "Cancelar"
+  $('#bulkForm').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && e.target.tagName === 'INPUT') e.preventDefault();
+  });
+
+  function parseBulkText() {
+    var parsed = FPGeo.parseBulk(bulkForm.text.value, 2001);
+    if (parsed.length > 2000) { toast('Máximo de 2000 linhas por importação; o resto foi ignorado', 4000); parsed = parsed.slice(0, 2000); }
+    var accepted = [];
+    bulkRows = parsed.map(function (r) {
+      if (r.erro) return r;
+      var dup = null;
+      for (var i = 0; i < db.portals.length && !dup; i++) {
+        if (FPGeo.haversine(r, db.portals[i]) < DUP_M) dup = 'já cadastrado: ' + db.portals[i].nome;
+      }
+      for (var j = 0; j < accepted.length && !dup; j++) {
+        if (FPGeo.haversine(r, accepted[j]) < DUP_M) dup = 'repetido da linha ' + accepted[j].linha;
+      }
+      r.dup = dup;
+      r.use = !dup;
+      if (!dup) accepted.push(r);
+      return r;
+    });
+    // Sem nome na linha: rótulo automático. O que importa é a posição; o jogador associa no jogo.
+    var n = nextPortalNumber();
+    // numera primeiro os que serão importados, depois os duplicados (desmarcados), para não pular números
+    [false, true].forEach(function (dupPass) {
+      bulkRows.forEach(function (r) {
+        if (!r.erro && !r.nome && !!r.dup === dupPass) r.nome = 'Portal ' + String(n++).padStart(2, '0');
+      });
+    });
+    renderBulk();
+  }
+
+  /** Próximo número livre para "Portal NN", olhando os portais salvos e as linhas da prévia. */
+  function nextPortalNumber() {
+    var max = 0;
+    db.portals.concat(bulkRows).forEach(function (p) {
+      var m = /^Portal (\d+)$/.exec(String(p.nome || '').trim());
+      if (m) max = Math.max(max, +m[1]);
+    });
+    return max + 1;
+  }
+
+  function renderBulk() {
+    var ul = $('#bulkPreview');
+    ul.textContent = '';
+    var ok = 0, err = 0, dup = 0;
+    bulkRows.forEach(function (r) {
+      if (r.erro) {
+        err++;
+        ul.appendChild(el('li', { class: 'bulk-row' }, [
+          el('span', { text: '✕' }),
+          el('div', { class: 'name', text: r.texto }),
+          el('div', { class: 'meta bad', text: 'Linha ' + r.linha + ': ' + r.erro + ' — ignorada' })
+        ]));
+        return;
+      }
+      if (r.dup) dup++; else ok++;
+      var cb = el('input', { type: 'checkbox', 'aria-label': 'Importar linha ' + r.linha });
+      cb.checked = r.use;
+      cb.addEventListener('change', function () { r.use = cb.checked; updateBulkSave(); });
+      var name = el('input', { type: 'text', maxlength: '80', placeholder: 'Nome (opcional)', 'aria-label': 'Nome do portal da linha ' + r.linha });
+      name.value = r.nome || '';
+      name.addEventListener('input', function () { r.nome = name.value; updateBulkSave(); });
+      // Enter não pode submeter o formulário (o botão padrão é "Cancelar" e perderia a edição)
+      name.addEventListener('keydown', function (e) {
+        if (e.key !== 'Enter') return;
+        e.preventDefault();
+        var all = ul.querySelectorAll('input[type=text]'), i = Array.prototype.indexOf.call(all, name);
+        if (all[i + 1]) all[i + 1].focus(); else name.blur();
+      });
+      ul.appendChild(el('li', { class: 'bulk-row' }, [
+        cb, name,
+        el('div', { class: 'meta' + (r.dup ? ' warn' : ''), text: 'Linha ' + r.linha + ' · ' + r.lat.toFixed(6) + ', ' + r.lng.toFixed(6) + (r.dup ? ' · ' + r.dup : '') })
+      ]));
+    });
+    $('#bulkSummary').textContent = bulkRows.length
+      ? ok + ' novo(s) · ' + dup + ' possível(is) duplicado(s) · ' + err + ' linha(s) sem coordenadas'
+      : '';
+    updateBulkSave();
+  }
+
+  function updateBulkSave() {
+    var sel = bulkRows.filter(function (r) { return !r.erro && r.use; });
+    var b = $('#bulkSave');
+    b.disabled = !sel.length;
+    b.textContent = 'Importar ' + sel.length;
+  }
+
+  $('#bulkDlg').addEventListener('close', function () {
+    if ($('#bulkDlg').returnValue !== 'save') return;
+    var nivel = clampInt(bulkForm.nivel.value, 1, 8, 1), chaves = clampInt(bulkForm.chaves.value, 0, 999, 0);
+    var added = [], n = nextPortalNumber();
+    bulkRows.forEach(function (r) {
+      if (r.erro || !r.use) return;
+      var nome = String(r.nome || '').trim() || 'Portal ' + String(n++).padStart(2, '0'); // usuário apagou o nome
+      var p = sanitizePortal({ id: newId(), nome: nome, lat: r.lat, lng: r.lng, nivel: nivel, chaves: chaves, observacao: '' });
+      if (p) { db.portals.push(p); added.push(p); }
+    });
+    bulkRows = [];
+    if (!added.length) return;
+    save();
+    map.fitBounds(L.latLngBounds(added.map(function (p) { return [p.lat, p.lng]; })).pad(0.2));
+    invalidatePlan();
+    toast(added.length + ' portal(is) importado(s). Ajuste nível e chaves na lista.', 4000);
   });
 
   $('#wipeBtn').addEventListener('click', function () {

@@ -144,16 +144,27 @@
    * Extrai lat,lng de um texto colado (link de compartilhamento de mapa, texto livre).
    * Apenas regex local — nunca abre nem busca a URL.
    */
-  function parseCoords(text) {
-    if (!text) return null;
+  function safeDecode(text) {
     var s = String(text);
     try { s = decodeURIComponent(s); } catch (e) { /* mantém original */ }
+    return s;
+  }
+
+  function parseCoords(text) {
+    var m = matchCoords(text ? safeDecode(text) : '');
+    return m ? { lat: m.lat, lng: m.lng } : null;
+  }
+
+  /** Como parseCoords, mas sobre texto já decodificado e devolvendo onde o par foi achado. */
+  function matchCoords(s) {
+    if (!s) return null;
     var num = '(-?\\d{1,3}(?:\\.\\d+)?)';
     var patterns = [
+      new RegExp('!3d' + num + '!4d' + num), // pino do lugar no Google Maps (mais preciso que o @ do centro da tela)
+      new RegExp('[?&#]pll=' + num + '\\s*,\\s*' + num, 'i'), // posição do portal; ll= costuma ser só o centro do mapa
       new RegExp('[?&#](?:pll|ll|q|query|center|daddr|destination)=' + num + '\\s*,\\s*' + num, 'i'),
       new RegExp('@' + num + ',' + num),
-      new RegExp('[?&]lat(?:itude)?=' + num + '[^#]*?[&]l(?:ng|on|ongitude)=' + num, 'i'),
-      new RegExp('!3d' + num + '!4d' + num),
+      new RegExp('[?&]lat(?:itude)?=' + num + '[^#]{0,300}?[&]l(?:ng|on|ongitude)=' + num, 'i'),
       new RegExp('geo:' + num + ',' + num, 'i'),
       new RegExp('(?:^|[^\\d.])' + '(-?\\d{1,2}\\.\\d{3,})' + '\\s*[,;\\s]\\s*' + '(-?\\d{1,3}\\.\\d{3,})')
     ];
@@ -162,15 +173,66 @@
       if (m) {
         var lat = parseFloat(m[1]), lng = parseFloat(m[2]);
         if (isFinite(lat) && isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180) {
-          return { lat: lat, lng: lng };
+          return { lat: lat, lng: lng, index: m.index, length: m[0].length };
         }
       }
     }
     return null;
   }
 
+  var SEP = /^[\s\-\u2013\u2014|;,:=>]+|[\s\-\u2013\u2014|;,:=<]+$/g;
+
+  function placeNameFromUrl(line) {
+    var m = String(line).match(/\/maps\/place\/([^\/@?#]+)/);
+    if (!m) return '';
+    try { return decodeURIComponent(m[1].replace(/\+/g, ' ')).trim(); } catch (e) { return ''; }
+  }
+
+  var MAX_LINE = 2000; // linhas maiores são cortadas (protege as regex de entradas patológicas)
+
+  /**
+   * Interpreta uma linha de importação em lote: link de mapa (ou coordenadas) + nome do portal,
+   * em qualquer ordem e com qualquer separador. Nunca abre o link.
+   * Retorna {nome, lat, lng} ou {erro}.
+   */
+  function parseBulkLine(line) {
+    var s = safeDecode(String(line || '').slice(0, MAX_LINE * 3).trim()).slice(0, MAX_LINE);
+    var c = matchCoords(s);
+    if (!c) {
+      if (/(?:maps\.app\.goo\.gl|goo\.gl\/maps)/i.test(s)) return { erro: 'link curto sem coordenadas' };
+      return { erro: 'sem coordenadas' };
+    }
+    // remove exatamente o par usado; o que sobra do link vira um só token e sai junto
+    var nome = (s.slice(0, c.index) + s.slice(c.index + c.length))
+      .replace(/https?:\/\/\S*/gi, ' ')
+      .replace(/\S*(?:www\.|google\.|openstreetmap\.|maps\.)\S*/gi, ' ')
+      .replace(/geo:\S*/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .replace(SEP, '')
+      .trim();
+    if (!nome) nome = placeNameFromUrl(s);
+    return { nome: nome.slice(0, 80), lat: c.lat, lng: c.lng };
+  }
+
+  /** Várias linhas → [{linha, texto, nome?, lat?, lng?, erro?}]. Ignora vazias e comentários (#, //). */
+  function parseBulk(text, maxRows) {
+    var out = [], limit = maxRows || 2000;
+    String(text || '').split(/\r?\n/).forEach(function (raw, i) {
+      if (out.length >= limit) return;
+      var t = raw.trim();
+      if (!t || /^(#|\/\/)/.test(t)) return;
+      var r = parseBulkLine(t);
+      r.linha = i + 1;
+      r.texto = t.slice(0, 200);
+      out.push(r);
+    });
+    return out;
+  }
+
   return {
     R: R,
+    parseBulkLine: parseBulkLine,
+    parseBulk: parseBulk,
     haversine: haversine,
     bearing: bearing,
     makeProjection: makeProjection,

@@ -64,6 +64,13 @@ tela inicial" instala o app e ele abre sem internet (os tiles já visualizados f
 - **Portais → Colar link** → cole um link de mapa ou texto com coordenadas; reconhece `?ll=`, `?pll=`,
   `?q=`, `@lat,lng`, `!3d…!4d…`, `geo:`, `lat=…&lng=…` e pares soltos como `-23.55, -46.63`.
   Links sem coordenadas (ex.: só com identificador) não são resolvidos — digite lat/lng.
+- **Portais → Importar lista de links** → cole ou abra um arquivo `.txt`, `.csv` ou `.json` (máx. 5 MB,
+  até 2000 linhas) com **uma linha por portal**: um link do Google Maps ou coordenadas, com nome opcional
+  em qualquer ordem. Exemplos de linha: `Masp; -23.5614, -46.6558` ou `https://www.google.com/maps/place/…`.
+  Sem nome na linha, usa o nome do lugar de um link `/maps/place/…`; sem nenhum nome, o portal vira `Portal 01`, `Portal 02`… (próximo número livre). A prévia é editável, aceita
+  nível e chaves padrão, e deixa desmarcados os portais a menos de 10 m de outro. Links nunca são abertos.
+  **Links curtos** (`maps.app.goo.gl`) não têm coordenadas e são recusados: abra o link no navegador e
+  copie o endereço completo, ou toque e segure no mapa do Google Maps e copie as coordenadas.
 - **Ajustes → Importar/Exportar JSON** (formato abaixo).
 
 Na lista de portais, os botões `−`/`+` ajustam chaves rapidamente.
@@ -169,6 +176,7 @@ npm test     # node --test, sem dependências
 | `tests/under-field.test.js` | regra "portal sob campo": interior/exterior/vértice/aresta/degenerado; no otimizador com campo aliado, inimigo e planejado; replay de um plano completo |
 | `tests/optimizer.test.js` | fanfield, links não se cruzam, bloqueador, chaves, limite de saída, alcance por nível, raio, pares falhos, 2-opt |
 | `tests/parse-and-compliance.test.js` | extração de coordenadas; ausência de domínios da Niantic no código; CSP |
+| `tests/bulk-import.test.js` | importação em lote: leitura de linhas (link, coordenadas, nome), prioridade `!3d`/`pll=` em `parseCoords`, links curtos recusados |
 | `tests/review-fixes.test.js` | ids `__proto__`/`constructor`/`toString` em portais, bloqueadores, done e excluded; portais na mesma posição nunca linkados; portal visitado sem links vira destino do fan |
 
 ## Estrutura

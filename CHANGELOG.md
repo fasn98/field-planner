@@ -1,6 +1,18 @@
 # Changelog
 
-Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Todas as versões saíram em 2026-11-13.
+Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Datas no formato AAAA-MM-DD.
+
+## [1.2.0] — 2026-11-14
+### Adicionado
+- "Importar lista de links" na aba Portais: uma linha por portal, com link do Google Maps ou coordenadas; o nome é opcional e, sem ele, o portal vira "Portal NN" (próximo número livre). Mostra prévia editável antes de salvar, com nível e chaves padrão para o lote (`index.html`, `app.js:673`).
+- Portais a menos de 10 m de um já cadastrado ou de outra linha da lista entram desmarcados na prévia (`app.js:673`, `app.js:723`).
+- Aceita arquivos `.txt`, `.csv` e `.json` (máx. 5 MB, `app.js:690`); um `.json` válido usa o import completo de JSON. A lista lê até 2000 linhas (`geo.js:219`, `app.js:713`).
+
+### Corrigido
+- `parseCoords` prioriza `!3d…!4d…` (pino do lugar) sobre `@` (centro da tela), e `pll=` sobre `ll=` (`geo.js:163-165`). Links com `!3d` e `?q=` ao mesmo tempo passam a dar outro resultado.
+
+### Conhecido
+- Links curtos (`maps.app.goo.gl`) não têm coordenadas e são recusados; o app nunca abre links.
 
 ## [1.1.2] — 2026-11-13
 ### Corrigido
