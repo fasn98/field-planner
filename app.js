@@ -8,7 +8,7 @@
   'use strict';
 
   var STORE = 'fieldplanner.v1';
-  var VERSION = '1.2.3';
+  var VERSION = '1.3.0';
   // Qualquer string de 1–64 caracteres sem controle. A segurança contra "constructor"/"__proto__"
   // vem dos mapas sem protótipo; filtrar mais trocaria ids e órfãos bloqueadores/links feitos.
   var ID_RE = /^[^\u0000-\u001f\u007f]{1,64}$/;
@@ -25,7 +25,7 @@
   function emptyDb() {
     return {
       version: 1, portals: [], blockers: [], done: [], excluded: [], coveredManual: [],
-      settings: { radius: 1500, maxOut: 8, objective: 'campos', strategy: 'auto' }
+      settings: { radius: 1500, maxOut: 8, objective: 'campos', strategy: 'auto', simulate: false }
     };
   }
   function load() {
@@ -130,6 +130,12 @@
     return m < 1000 ? Math.round(m) + ' m' : (m / 1000).toFixed(2).replace('.', ',') + ' km';
   }
   function fmtNum(n) { return Number(n).toLocaleString('pt-BR'); }
+  function fmtArea(m2) {
+    if (!m2) return '0 m²';
+    if (m2 < 10000) return fmtNum(Math.round(m2)) + ' m²';
+    if (m2 < 1e6) return (m2 / 10000).toFixed(1).replace('.', ',') + ' ha';
+    return (m2 / 1e6).toFixed(2).replace('.', ',') + ' km²';
+  }
   var toastTimer;
   function toast(msg, ms) {
     var t = $('#toast');
@@ -345,6 +351,7 @@
       input: {
         portals: db.portals, blockers: db.blockers, done: db.done, excluded: db.excluded, coveredManual: db.coveredManual,
         position: lastOptPos, radius: s.radius, maxOut: s.maxOut, objective: s.objective, strategy: s.strategy,
+        ignoreKeys: !!s.simulate,
         timeBudgetMs: 1500
       }
     });
@@ -360,32 +367,37 @@
   /* Painel: Plano.                                                */
   /* ------------------------------------------------------------ */
 
-  var cfg = { radius: $('#cfgRadius'), maxOut: $('#cfgMaxOut'), objective: $('#cfgObjective'), strategy: $('#cfgStrategy') };
+  var cfg = { radius: $('#cfgRadius'), maxOut: $('#cfgMaxOut'), objective: $('#cfgObjective'), strategy: $('#cfgStrategy'), simulate: $('#cfgSimulate') };
+  cfg.simulate.checked = !!db.settings.simulate;
   cfg.radius.value = db.settings.radius;
   cfg.maxOut.value = db.settings.maxOut;
   cfg.objective.value = db.settings.objective;
   cfg.strategy.value = db.settings.strategy;
   Object.keys(cfg).forEach(function (k) {
     cfg[k].addEventListener('change', function () {
-      db.settings.radius = clampInt(cfg.radius.value, 100, 20000, 1500);
+      db.settings.radius = clampInt(cfg.radius.value, 100, 100000, 1500);
       db.settings.maxOut = clampInt(cfg.maxOut.value, 1, 40, 8);
       db.settings.objective = cfg.objective.value;
       db.settings.strategy = cfg.strategy.value;
+      var simChanged = db.settings.simulate !== cfg.simulate.checked;
+      db.settings.simulate = cfg.simulate.checked;
       cfg.radius.value = db.settings.radius;
       cfg.maxOut.value = db.settings.maxOut;
       save();
+      if (simChanged && plan) optimize(db.settings.simulate ? 'simulação ligada' : 'simulação desligada');
     });
   });
 
   $('#optBtn').addEventListener('click', function () { optimize(''); });
   $('#startBtn').addEventListener('click', function () { setFieldMode(true); });
 
-  var STRAT_NAMES = { fanfield: 'Fanfield', triangulacao: 'Triangulação' };
+  var STRAT_NAMES = { fanfield: 'Fanfield', triangulacao: 'Triangulação', multicamada: 'Multicamada' };
 
   function renderPlanPanel() {
     var out = $('#planOut');
     out.textContent = '';
-    $('#startBtn').disabled = !(plan && plan.links.length);
+    // simulação não vai para o modo em campo: os links dependem de chaves que você ainda não tem
+    $('#startBtn').disabled = !(plan && plan.links.length) || !!(plan && plan.simulation);
     if (!plan) {
       out.appendChild(el('p', { class: 'muted', text: 'Cadastre portais (toque longo no mapa, ou aba Portais) e toque em “Calcular plano”.' }));
       return;
@@ -397,7 +409,16 @@
       el('div', { class: 'stat' }, [el('b', { text: fmtDist(plan.distance) }), el('span', { text: 'a pé' })])
     ]);
     out.appendChild(stats);
+    if (plan.simulation) {
+      out.appendChild(el('div', { class: 'sim-banner', text: '🧪 Simulação: plano ideal pela posição dos portais, sem considerar suas chaves. ' +
+        'Use a lista de farm abaixo para buscar as chaves; depois desligue a simulação para executar em campo.' }));
+    }
+    if (plan.fields.length) {
+      out.appendChild(el('p', { class: 'muted small', text: 'Área total dos campos: ' + fmtArea(plan.area) +
+        ' — o MU real é proporcional à área × densidade populacional local (desconhecida).' }));
+    }
     var meta = (STRAT_NAMES[plan.strategy] || '–') + (plan.anchor ? ' · âncora: ' + pname(plan.anchor) : '') +
+      (plan.base ? ' · base: ' + pname(plan.base[0]) + ' – ' + pname(plan.base[1]) + ' · ' + plan.layers + ' camada(s)' : '') +
       ' · ' + (plan.inRadius > plan.candidates
         ? plan.candidates + ' de ' + plan.inRadius + ' portais ' + (lastOptPos ? 'no raio ' : '') + 'considerados (com chave e mais próximos primeiro)'
         : plan.candidates + ' portal(is) no raio') + ' · ' + plan.elapsedMs + ' ms';
@@ -423,7 +444,7 @@
       var ol = el('ol', { class: 'steps' });
       plan.steps.forEach(function (s, i) {
         var links = s.links.map(function (l) {
-          return '#' + l.n + ' → ' + pname(l.to) + (l.fields ? ' (+' + l.fields + ' campo' + (l.fields > 1 ? 's' : '') + ')' : '');
+          return '#' + l.n + ' → ' + pname(l.to) + (l.fields ? ' (+' + l.fields + ' campo' + (l.fields > 1 ? 's' : '') + ', ' + fmtArea(l.area) + ')' : '');
         }).join(', ');
         ol.appendChild(el('li', null, [
           el('span', { class: 'num', text: String(i + 1) }),
@@ -444,9 +465,15 @@
       out.appendChild(el('table', null, [el('thead', null, [el('tr', null, [el('th', { text: 'Portal' }), el('th', { class: 'n', text: 'usar' }), el('th', { class: 'n', text: 'tem' })])]), tb]));
     }
     if (plan.keysMissing.length) {
-      out.appendChild(el('h3', { text: 'Chaves faltantes' }));
-      var gain = plan.potentialFields - plan.fields.length;
-      if (gain > 0) out.appendChild(el('p', { class: 'muted small', text: 'Com essas chaves, a mesma rota renderia ' + plan.potentialFields + ' campos (+' + gain + ').' }));
+      if (plan.simulation) {
+        var totalFarm = plan.keysMissing.reduce(function (a, k) { return a + k.missing; }, 0);
+        out.appendChild(el('h3', { text: '🔑 Lista de farm' }));
+        out.appendChild(el('p', { class: 'farm-total', text: 'Faltam ' + totalFarm + ' chave(s) em ' + plan.keysMissing.length + ' portal(is) para executar este plano.' }));
+      } else {
+        out.appendChild(el('h3', { text: 'Chaves faltantes' }));
+        var gain = plan.potentialFields - plan.fields.length;
+        if (gain > 0) out.appendChild(el('p', { class: 'muted small', text: 'Com essas chaves, a mesma rota renderia ' + plan.potentialFields + ' campos (+' + gain + ').' }));
+      }
       var ul = el('ul', { class: 'list' });
       plan.keysMissing.forEach(function (k) {
         ul.appendChild(el('li', null, [el('b', { text: pname(k.portal) }), el('span', { class: 'muted', text: ' · faltam ' + k.missing + ' (precisa ' + k.need + ', tem ' + k.have + ')' })]));
@@ -694,13 +721,14 @@
     if (data.settings && typeof data.settings === 'object') {
       var st = data.settings;
       db.settings = {
-        radius: clampInt(st.radius, 100, 20000, db.settings.radius),
+        radius: clampInt(st.radius, 100, 100000, db.settings.radius),
         maxOut: clampInt(st.maxOut, 1, 40, db.settings.maxOut),
-        objective: ['campos', 'ap', 'distancia'].indexOf(st.objective) >= 0 ? st.objective : db.settings.objective,
-        strategy: ['auto', 'fanfield', 'triangulacao'].indexOf(st.strategy) >= 0 ? st.strategy : db.settings.strategy
+        objective: ['campos', 'ap', 'distancia', 'mu'].indexOf(st.objective) >= 0 ? st.objective : db.settings.objective,
+          simulate: typeof st.simulate === 'boolean' ? st.simulate : db.settings.simulate,
+        strategy: ['auto', 'fanfield', 'triangulacao', 'multicamada'].indexOf(st.strategy) >= 0 ? st.strategy : db.settings.strategy
       };
       cfg.radius.value = db.settings.radius; cfg.maxOut.value = db.settings.maxOut;
-      cfg.objective.value = db.settings.objective; cfg.strategy.value = db.settings.strategy;
+      cfg.objective.value = db.settings.objective; cfg.strategy.value = db.settings.strategy; cfg.simulate.checked = db.settings.simulate;
     }
     save();
     if (db.portals.length) map.fitBounds(L.latLngBounds(db.portals.map(function (p) { return [p.lat, p.lng]; })).pad(0.2));

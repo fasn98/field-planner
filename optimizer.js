@@ -12,7 +12,8 @@
   var AP_LINK = 313;
   var AP_FIELD = 1250;
   var INF_KEYS = 1e6;
-  var MAX_CAND = 30; // portais considerados por cálculo (os demais ficam de fora do plano)
+  var MAX_CAND = 30;
+  var FAR_M = 8.9e6; // ~80° de arco // portais considerados por cálculo (os demais ficam de fora do plano)
 
   function pairKey(i, j) { return i < j ? i + '|' + j : j + '|' + i; }
 
@@ -36,13 +37,21 @@
     });
 
     // Links fixos: bloqueadores inimigos/aliados + links que o próprio usuário já fez.
+    pts.forEach(function (p) {
+      p.dist0 = G.haversine(ref, p);
+      // a projeção gnomônica só vale até 90° da referência: além de ~80° o portal fica fora da conta
+      p.far = p.dist0 > FAR_M;
+    });
+
     var fixed = [];
     (input.blockers || []).forEach(function (b) {
       if (idx[b.portalA] === undefined || idx[b.portalB] === undefined || b.portalA === b.portalB) return;
+      if (pts[idx[b.portalA]].far || pts[idx[b.portalB]].far) return;
       fixed.push({ a: idx[b.portalA], b: idx[b.portalB], kind: b.origem === 'aliado' ? 'ally' : 'enemy' });
     });
     (input.done || []).forEach(function (d) {
       if (idx[d.from] === undefined || idx[d.to] === undefined || d.from === d.to) return;
+      if (pts[idx[d.from]].far || pts[idx[d.to]].far) return;
       fixed.push({ a: idx[d.from], b: idx[d.to], kind: 'own' });
     });
 
@@ -54,8 +63,7 @@
     var radius = Number(input.radius) > 0 ? Number(input.radius) : 1500;
     var candidates = [];
     pts.forEach(function (p, i) {
-      p.dist0 = G.haversine(ref, p);
-      if (!input.position || p.dist0 <= radius) candidates.push(i);
+      if (!p.far && (!input.position || p.dist0 <= radius)) candidates.push(i);
     });
     // Muitos portais no raio (ex.: lista importada com centenas de pontos) deixariam a busca
     // impraticável. Fica com os MAX_CAND mais úteis: primeiro os que têm chave, depois os mais próximos.
@@ -63,7 +71,7 @@
     var maxCand = Math.max(3, Math.floor(Number(input.maxCandidates) || MAX_CAND));
     if (candidates.length > maxCand) {
       candidates.sort(function (a, b) {
-        var ka = pts[a].keys > 0 ? 0 : 1, kb = pts[b].keys > 0 ? 0 : 1;
+        var ka = !input.ignoreKeys && pts[a].keys > 0 ? 0 : 1, kb = !input.ignoreKeys && pts[b].keys > 0 ? 0 : 1;
         return ka - kb || pts[a].dist0 - pts[b].dist0;
       });
       candidates = candidates.slice(0, maxCand);
@@ -95,6 +103,7 @@
     this.covered = new Array(n).fill(false);
     this.planLinks = [];           // {from,to,fields:[[i,j,k]]}
     this.planFields = [];
+    this.area = 0;                 // soma das áreas dos campos planejados (m²) — proxy de MU
     for (var i = 0; i < n; i++) this.friendAdj.push({});
     for (i = 0; i < world.forcedCovered.length; i++) this.covered[world.forcedCovered[i]] = true;
 
@@ -135,7 +144,7 @@
     if (w.excluded[pairKey(s, t)]) return 'par marcado como falho';
     if (this.out[s] >= w.maxOut) return 'limite de links de saída';
     if (this.keysLeft[t] <= 0) return 'sem chave do destino';
-    var d = Math.hypot(P[s].x - P[t].x, P[s].y - P[t].y);
+    var d = G.haversine(P[s], P[t]); // distância real (a projeção estica longe do centro)
     if (d < 1) return 'portais na mesma posição';
     if (d > G.linkRange(P[s].level)) return 'fora do alcance';
     for (var i = 0; i < this.links.length; i++) {
@@ -170,7 +179,12 @@
     this.keysLeft[t]--;
     this.keysUsed[t]++;
     var self = this;
-    fields.forEach(function (f) { self._addCover(f); self.planFields.push(f); });
+    var P = this.w.pts;
+    fields.forEach(function (f) {
+      self._addCover(f);
+      self.planFields.push(f);
+      self.area += G.triangleArea(P[f[0]], P[f[1]], P[f[2]]);
+    });
     this.planLinks.push({ from: s, to: t, fields: fields });
     return fields;
   };
@@ -188,7 +202,12 @@
     order.forEach(function (s) {
       var made = [];
       if (!st.covered[s]) {
-        if (policy.type === 'fan') {
+        if (policy.type === 'layers') {
+          // multicamada: cada visita tem destinos fixos (A→B na base; Ci→A e Ci→B nas camadas)
+          (policy.targets[s] || []).forEach(function (t) {
+            if (st.whyNot(s, t) === null) made.push({ to: t, fields: st.addLink(s, t) });
+          });
+        } else if (policy.type === 'fan') {
           var prio = [policy.anchor];
           for (var k = steps.length - 1; k >= 0; k--) prio.push(steps[k].portal);
           // portais visitados sem links também servem como destino
@@ -203,10 +222,15 @@
             for (var ci = 0; ci < world.candidates.length; ci++) {
               var t = world.candidates[ci];
               if (t === s || st.whyNot(s, t) !== null) continue;
-              var nf = st.fieldsFor(s, t).length;
+              var ff = st.fieldsFor(s, t), nf = ff.length;
               if (nf === 0 && !visited[t]) continue; // evita links "soltos" para portais ainda não visitados
               var len = Math.hypot(P[s].x - P[t].x, P[s].y - P[t].y);
-              var score = nf * 1e6 + (visited[t] ? 1e3 : 0) - len;
+              var gain = nf * 1e6;
+              if (world.objective === 'mu') {
+                gain = 0;
+                for (var fi = 0; fi < nf; fi++) gain += G.triangleArea(P[ff[fi][0]], P[ff[fi][1]], P[ff[fi][2]]) * 10 + 1;
+              }
+              var score = gain + (visited[t] ? 1e3 : 0) - len;
               if (score > bestScore) { bestScore = score; bestT = t; }
             }
             if (bestT < 0) break;
@@ -233,12 +257,14 @@
     var nLinks = st.planLinks.length, nFields = st.planFields.length;
     return {
       steps: steps, state: st, distance: dist,
-      links: nLinks, fields: nFields, ap: nLinks * AP_LINK + nFields * AP_FIELD
+      links: nLinks, fields: nFields, ap: nLinks * AP_LINK + nFields * AP_FIELD, area: st.area
     };
   }
 
   function score(res, objective) {
     if (objective === 'ap') return res.ap * 100 - res.distance;
+    // MU = área × densidade local (desconhecida): dentro de uma mesma região, mais área ≈ mais MU
+    if (objective === 'mu') return res.area - res.distance * 1e-3; // área decide; caminhada só desempata
     if (objective === 'distancia') return res.ap / (res.distance + 300) + res.fields * 1e-6;
     return res.fields * 1e6 + res.links - res.distance / 1e3; // 'campos' (padrão)
   }
@@ -315,6 +341,55 @@
     });
   }
 
+  /*
+   * Multicamada: base A–B e, de cada lado, a maior cadeia de portais encaixados C1 ⊃ C2 ⊃ … ⊃ Cn
+   * (cada Ci dentro do triângulo A-B-C(i−1)). Executa do miolo para fora: A→B, depois Cn→A, Cn→B, …,
+   * C1→A, C1→B. Assim nenhum Ci está sob campo quando linka, e cada camada empilha sobre a anterior.
+   * Peso da cadeia: 1 por camada, ou a área da camada no objetivo 'mu' (cada camada conta MU de novo).
+   */
+  function layerChain(world, A, B, side) {
+    var P = world.pts, pa = P[A], pb = P[B];
+    var cand = world.candidates.filter(function (i) {
+      return i !== A && i !== B && Math.sign(G.orient(pa, pb, P[i])) === side;
+    }).map(function (i) { return { i: i, area: G.triangleArea(pa, pb, P[i]) }; })
+      .sort(function (x, y) { return y.area - x.area; }); // de fora para dentro
+    var w = function (c) { return world.objective === 'mu' ? c.area : 1; };
+    var dp = [], prev = [], best = -1;
+    for (var k = 0; k < cand.length; k++) {
+      dp[k] = w(cand[k]); prev[k] = -1;
+      for (var j = 0; j < k; j++) {
+        // cand[k] precisa estar dentro do triângulo da camada externa cand[j]
+        if (dp[j] + w(cand[k]) > dp[k] && G.pointInTriangle(P[cand[k].i], pa, pb, P[cand[j].i])) {
+          dp[k] = dp[j] + w(cand[k]); prev[k] = j;
+        }
+      }
+      if (best < 0 || dp[k] > dp[best]) best = k;
+    }
+    var chain = [];
+    for (var c = best; c >= 0; c = prev[c]) chain.push(cand[c].i); // do miolo para fora
+    return chain;
+  }
+
+  function layerPlans(world, consider, deadline) {
+    var ids = world.candidates;
+    for (var a = 0; a < ids.length; a++) {
+      for (var b = a + 1; b < ids.length; b++) {
+        if ((a > 0 || b > 1) && Date.now() >= deadline) return;
+        var A = ids[a], B = ids[b];
+        [[A, B], [B, A]].forEach(function (pair) {
+          var s = pair[0], t = pair[1];
+          var left = layerChain(world, s, t, 1), right = layerChain(world, s, t, -1);
+          if (!left.length && !right.length) return;
+          var targets = {}; targets[s] = [t];
+          left.concat(right).forEach(function (c) { targets[c] = [s, t]; });
+          var order = [s].concat(left, right);
+          var policy = { type: 'layers', targets: targets, base: [s, t], layers: left.length + right.length };
+          consider(simulate(world, order, policy), 'multicamada', order, policy);
+        });
+      }
+    }
+  }
+
   function permutations(arr, cb) {
     var a = arr.slice(), n = a.length, c = new Array(n).fill(0), i = 0;
     if (cb(a.slice()) === false) return;
@@ -382,9 +457,11 @@
     }
 
     if (world.candidates.length >= 2) {
-      // no modo automático o fanfield usa no máximo metade do orçamento; o resto fica para a triangulação
-      var fanDeadline = strategy === 'auto' ? t0 + budget / 2 : deadline;
+      // no modo automático cada estratégia usa até 1/3 do orçamento; a triangulação fica com o resto
+      var fanDeadline = strategy === 'auto' ? t0 + budget / 3 : deadline;
+      var layerDeadline = strategy === 'auto' ? t0 + 2 * budget / 3 : deadline;
       if (strategy === 'auto' || strategy === 'fanfield') fanfieldPlans(world, consider, fanDeadline);
+      if (strategy === 'auto' || strategy === 'multicamada') layerPlans(world, consider, layerDeadline);
       if (strategy === 'auto' || strategy === 'triangulacao') triangulationPlans(world, consider, deadline);
     }
 
@@ -392,9 +469,11 @@
       ok: true,
       strategy: best ? best.strategy : null,
       anchor: best && best.policy.type === 'fan' ? world.pts[best.policy.anchor].id : null,
+      base: best && best.policy.type === 'layers' ? best.policy.base.map(function (i) { return world.pts[i].id; }) : null,
+      layers: best && best.policy.type === 'layers' ? best.res.fields : 0,
       candidates: world.candidates.length,
       inRadius: world.inRadius,
-      steps: [], links: [], fields: [], distance: 0, ap: 0,
+      steps: [], links: [], fields: [], distance: 0, ap: 0, area: 0, simulation: !!input.ignoreKeys,
       keysUsed: [], keysMissing: [], potentialFields: 0,
       elapsedMs: 0
     };
@@ -407,20 +486,32 @@
         walk: Math.round(st.walk),
         links: st.links.map(function (l) {
           n++;
-          var link = { n: n, from: P[st.portal].id, to: P[l.to].id, fields: l.fields.length };
+          var link = {
+            n: n, from: P[st.portal].id, to: P[l.to].id, fields: l.fields.length,
+            area: Math.round(l.fields.reduce(function (a, f) { return a + G.triangleArea(P[f[0]], P[f[1]], P[f[2]]); }, 0))
+          };
           out.links.push(link);
           l.fields.forEach(function (f) {
-            out.fields.push({ link: n, portals: f.map(function (i) { return P[i].id; }) });
+            out.fields.push({ link: n, portals: f.map(function (i) { return P[i].id; }), area: Math.round(G.triangleArea(P[f[0]], P[f[1]], P[f[2]])) });
           });
           return link;
         })
       };
     });
     out.distance = Math.round(res.distance);
+    out.area = Math.round(res.area);
+    out.simulation = world.ignoreKeys;
     out.ap = res.ap;
     res.state.keysUsed.forEach(function (k, i) {
       if (k > 0) out.keysUsed.push({ portal: P[i].id, used: k, have: P[i].keys });
     });
+    // Simulação: o plano ignorou as chaves; a lista de farm diz quantas faltam de cada portal.
+    if (world.ignoreKeys) {
+      out.keysUsed.forEach(function (k) {
+        if (k.used > k.have) out.keysMissing.push({ portal: k.portal, need: k.used, have: k.have, missing: k.used - k.have });
+      });
+      out.potentialFields = res.fields;
+    }
 
     // Chaves faltantes: mesma ordem/política, sem limite de chaves; compara a necessidade.
     if (!world.ignoreKeys) {
@@ -438,7 +529,7 @@
   return {
     optimize: optimize,
     // expostos para testes
-    _internal: { buildWorld: buildWorld, State: State, simulate: simulate, nearestNeighbor: nearestNeighbor, twoOpt: twoOpt, angularOrder: angularOrder, routeLength: routeLength },
+    _internal: { layerChain: layerChain, buildWorld: buildWorld, State: State, simulate: simulate, nearestNeighbor: nearestNeighbor, twoOpt: twoOpt, angularOrder: angularOrder, routeLength: routeLength },
     AP_LINK: AP_LINK,
     AP_FIELD: AP_FIELD
   };

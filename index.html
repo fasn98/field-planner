@@ -130,6 +130,10 @@
     min-height: 48px; padding: 0 18px; border-radius: 24px; border: 0; background: var(--accent); color: var(--accent-ink); font-weight: 700;
     box-shadow: 0 4px 16px rgba(0,0,0,.5); max-width: 92vw; }
   #updateBar[hidden] { display: none; }
+  .sim-toggle { display: flex; gap: 10px; align-items: flex-start; margin: 10px 0; padding: 10px 12px; background: var(--panel2); border-radius: 12px; cursor: pointer; }
+  .sim-toggle input { width: 24px; min-height: 24px; margin-top: 2px; flex-shrink: 0; }
+  .sim-banner { background: rgba(210,153,34,.15); border: 1px solid var(--warn); color: var(--text); border-radius: 12px; padding: 10px 12px; margin: 8px 0; font-size: 14px; }
+  .farm-total { font-size: 15px; margin: 6px 0; }
   .fab { position: fixed; right: 12px; z-index: 1000; width: 52px; height: 52px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); font-size: 22px; }
 </style>
 </head>
@@ -165,6 +169,7 @@
             <option value="campos">Máx. campos</option>
             <option value="ap">Máx. AP</option>
             <option value="distancia">Mín. distância (AP por metro)</option>
+            <option value="mu">Máx. área (≈ MU)</option>
           </select>
         </label>
         <label class="f grow">Estratégia
@@ -172,9 +177,14 @@
             <option value="auto">Automática</option>
             <option value="fanfield">Fanfield</option>
             <option value="triangulacao">Triangulação</option>
+            <option value="multicamada">Multicamada</option>
           </select>
         </label>
       </div>
+      <label class="sim-toggle">
+        <input id="cfgSimulate" type="checkbox">
+        <span><b>Simular sem chaves</b><br><span class="muted small">Mostra o melhor plano que a posição dos portais permite e quantas chaves farmar de cada um.</span></span>
+      </label>
       <div class="row">
         <button id="optBtn" class="btn primary grow">Calcular plano</button>
         <button id="startBtn" class="btn grow" disabled>Modo em campo</button>

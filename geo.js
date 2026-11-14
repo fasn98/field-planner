@@ -33,12 +33,18 @@
     return (Math.atan2(y, x) / DEG + 360) % 360;
   }
 
-  /** Cria uma projeção local equiretangular centrada em ref. */
+  /**
+   * Projeção gnomônica centrada em ref: todo grande círculo (o caminho real de um link) vira uma reta,
+   * então os testes de cruzamento e de "sob campo" são exatos em qualquer escala usada no jogo
+   * (válida até 90° da referência). Distâncias e áreas esticam longe do centro: alcance usa haversine.
+   */
   function makeProjection(ref) {
-    var k = Math.cos(ref.lat * DEG);
+    var f0 = ref.lat * DEG, l0 = ref.lng * DEG, sf0 = Math.sin(f0), cf0 = Math.cos(f0);
     return {
       toXY: function (p) {
-        return { x: (p.lng - ref.lng) * DEG * R * k, y: (p.lat - ref.lat) * DEG * R };
+        var f = p.lat * DEG, dl = p.lng * DEG - l0, sf = Math.sin(f), cf = Math.cos(f), cdl = Math.cos(dl);
+        var c = sf0 * sf + cf0 * cf * cdl;
+        return { x: R * cf * Math.sin(dl) / c, y: R * (cf0 * sf - sf0 * cf * cdl) / c };
       }
     };
   }

@@ -56,3 +56,44 @@ test('é simétrico na ordem dos segmentos e das pontas', () => {
   assert.equal(G.segmentsCross(c, d, a, b), r);
   assert.equal(G.segmentsCross(b, a, d, c), r);
 });
+
+// --- links longos seguem a geodésica (grande círculo), não a reta do mapa plano ---
+
+function gcMidpoint(a, b) {
+  const D = Math.PI / 180, f1 = a.lat * D, l1 = a.lng * D, f2 = b.lat * D, l2 = b.lng * D;
+  const bx = Math.cos(f2) * Math.cos(l2 - l1), by = Math.cos(f2) * Math.sin(l2 - l1);
+  const f = Math.atan2(Math.sin(f1) + Math.sin(f2), Math.sqrt((Math.cos(f1) + bx) ** 2 + by ** 2));
+  const l = l1 + Math.atan2(by, Math.cos(f1) + bx);
+  return { lat: f / D, lng: l / D };
+}
+
+test('projeção: o ponto médio da geodésica cai sobre a reta projetada (link de ~60 km E–O)', () => {
+  const a = { lat: -23.6, lng: -46.9 }, b = { lat: -23.6, lng: -46.3 };
+  const m = gcMidpoint(a, b);
+  const pr = G.makeProjection(G.centroid([a, b]));
+  const A = pr.toXY(a), B = pr.toXY(b), M = pr.toXY(m);
+  const dist = Math.abs(G.orient(A, B, M)) / Math.hypot(B.x - A.x, B.y - A.y);
+  assert.ok(dist < 0.5, `geodésica a ${dist.toFixed(2)} m da reta`); // equiretangular dava ~30 m
+});
+
+test('cruzamento em escala de dezenas de km segue a geodésica', () => {
+  // link E–O de 60 km; o outro link termina 10 m ao sul da reta "plana" mas ao norte da geodésica
+  const a = { lat: -23.6, lng: -46.9 }, b = { lat: -23.6, lng: -46.3 };
+  const m = gcMidpoint(a, b); // no hemisfério sul a geodésica E–O se curva para o sul (para o polo)
+  const dLat = 10 / 111195;
+  const above = { lat: m.lat + dLat, lng: m.lng }, below = { lat: m.lat - dLat, lng: m.lng };
+  const north = { lat: -23.3, lng: -46.6 };
+  assert.equal(G.linksCrossLL(a, b, north, above), false, 'termina antes da geodésica: não cruza');
+  assert.equal(G.linksCrossLL(a, b, north, below), true, 'passa da geodésica: cruza');
+});
+
+test('portal do outro lado do planeta não entra na conta (projeção só vale até 90°)', () => {
+  const O = require('../optimizer.js');
+  const { at, portal } = require('./helpers.js');
+  const ps = [portal('A', 0, 0), portal('B', 300, 0), portal('C', 150, 260),
+    { id: 'JP', nome: 'Tóquio', lat: 35.68, lng: 139.76, nivel: 8, chaves: 5 }];
+  const res = O.optimize({ portals: ps, position: at(0, 0),
+    blockers: [{ portalA: 'A', portalB: 'JP', origem: 'inimigo' }], timeBudgetMs: 200 });
+  assert.equal(res.fields.length, 1); // o link A–Tóquio não bloqueia nada aqui
+  assert.ok(res.links.every(l => l.from !== 'JP' && l.to !== 'JP'));
+});

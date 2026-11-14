@@ -7,7 +7,7 @@
  * Tiles OSM: cache-first com rede como fallback, só os que você já visualizou (sem download em massa,
  * conforme a política de uso de tiles do OSM). Qualquer outra origem: não intercepta.
  */
-var VERSION = 'fp-v1.2.3';
+var VERSION = 'fp-v1.3.0';
 var SHELL = 'shell-' + VERSION;
 var TILES = 'tiles-v2'; // v1 guardava respostas opacas, incompatíveis com requests CORS
 var TILE_HOST = 'tile.openstreetmap.org';
