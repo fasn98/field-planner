@@ -21,8 +21,16 @@ Estas regras são **inegociáveis** e fazem parte do design, não são opções:
    falsifica posição. Sem GPS, ele planeja a partir do centro dos portais cadastrados — e diz isso na tela.
 4. **Nenhum dado de outros jogadores é armazenado.** Links bloqueadores guardam só os dois portais e a
    origem (`inimigo`/`aliado`) — nunca nome de agente. O campo de observação avisa para não registrar nomes.
-5. **Todos os dados de portais são digitados pelo usuário** e ficam apenas no aparelho
-   (`localStorage`). Nada é enviado a servidor algum.
+   Campos extras de arquivos importados, como cor ou facção, são descartados: só posição, nome, nível,
+   chaves e observação são guardados (`sanitizePortal`, `app.js:64`).
+5. **Os portais entram por ação manual do usuário**: digitados, link colado, ou arquivo JSON/texto que ele
+   mesmo prepara e importa. Isso inclui coordenadas que ele estima a partir de prints de mapa. O app nunca
+   captura tela, não lê nem baixa nada de serviços do jogo e não automatiza a coleta: só lê o arquivo que o
+   usuário escolhe. Os dados ficam apenas no aparelho (`localStorage`) e nada é enviado a servidor algum.
+6. **O plano não substitui o jogo.** O app só planeja; toda ação acontece no jogo, a pé. Sem a chave do
+   portal (obtida em campo), não há link; sem link, não há campo; sem campo, não há MU. Todo link do plano
+   usa só chaves que o usuário informou ter (`optimizer.js:137`). Nenhuma forma automatizada de agir no
+   jogo ou de contornar suas regras faz parte do escopo.
 
 ### Como isso é garantido no código
 
@@ -30,6 +38,7 @@ Estas regras são **inegociáveis** e fazem parte do design, não são opções:
 | :- | :- |
 | A página só pode buscar recursos de si mesma e imagens de `tile.openstreetmap.org` | CSP em `index.html` (`default-src 'self'`, `connect-src 'self'`) |
 | O service worker só intercepta a própria origem e os tiles do OSM | `sw.js` |
+| Import guarda só id, nome, posição, nível, chaves e observação; descarta qualquer outro campo (ex.: facção) | `sanitizePortal` em `app.js:64` |
 | Colar link **não abre** a URL: só extrai `lat,lng` por regex local | `parseCoords` em `geo.js` |
 | Teste automatizado falha se qualquer arquivo de código citar domínio da Niantic | `tests/parse-and-compliance.test.js` |
 | Teste automatizado falha se a CSP liberar outro host além do OSM | `tests/parse-and-compliance.test.js` |
@@ -59,6 +68,10 @@ tela inicial" instala o app e ele abre sem internet (os tiles já visualizados f
 > app em uso, aparece o aviso "Nova versão disponível": toque para recarregar. A versão aparece no fim da
 > aba Ajustes.
 
+> **Listas grandes:** o cálculo considera no máximo 30 portais (os que têm chave e os mais próximos
+> primeiro, `optimizer.js:15`); o plano mostra "N de M considerados". Coordenadas estimadas de prints têm
+> erro de dezenas de metros: confira os portais do campo antes de sair. (Os próprios arquivos de exemplo declaram precisão de 10–30 m e de 20–80 m.)
+
 ### Cadastrar portais
 
 - **Toque longo no mapa** → formulário já com a coordenada.
@@ -74,7 +87,7 @@ tela inicial" instala o app e ele abre sem internet (os tiles já visualizados f
   **Links curtos** (`maps.app.goo.gl`) não têm coordenadas e são recusados: abra o link no navegador e
   copie o endereço completo, ou toque e segure no mapa do Google Maps e copie as coordenadas.
 - **Ajustes → Importar/Exportar JSON** (formato abaixo).
-  Aceita a chave `"portals"` ou `"portais"` e `lat`/`lng` ou `latitude`/`longitude`/`lon`. Reimportar um
+  Aceita a chave `"portals"` ou `"portais"` e `lat`/`lng` ou `latitude`/`longitude`/`lon`. A chave de lista também pode ser `"pontos"`; portal sem nome vira `Portal NN`. Reimportar um
   arquivo sem `id` não duplica: portal a menos de 10 m de um existente é o mesmo e mantém chaves e nível.
 - **Portais → 🔑 Chaves** → quantas chaves de cada portal você tem. Cada link *para* um portal gasta uma
   chave dele; portal com zero chaves (em vermelho) não recebe links.
@@ -140,8 +153,8 @@ junto com quantos campos a mais isso renderia.
   sem campo real seria tratado como campo.
 - Alcance não considera Link Amps nem outros mods.
 - A seta do modo em campo é relativa ao norte quando o GPS não fornece direção de movimento.
-- O fanfield não respeita o orçamento de tempo com muitos portais: cerca de 800 ms com 80 portais, e o
-  tempo cresce rápido.
+- Cada cálculo considera no máximo 30 portais (com chave e mais próximos primeiro); com mais portais no
+  raio, um portal útil mais distante e sem chave pode ficar de fora. O plano informa "N de M considerados".
 - Cada recálculo pode trocar de estratégia ou de âncora no meio de um fanfield.
 - Os tiles em cache não expiram (máximo de 3000, `sw.js:11`).
 - Os fluxos de `app.js` e `sw.js` não têm teste automatizado.

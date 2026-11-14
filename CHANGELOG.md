@@ -2,6 +2,20 @@
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Datas no formato AAAA-MM-DD.
 
+## [1.2.3] — 2026-11-14
+### Adicionado
+- O import de JSON aceita a chave `"pontos"`; portal sem nome recebe "Portal NN" quando é adicionado. Atualizar por `id` preserva o nome existente (`app.js:657`, `app.js:668-676`).
+- O plano mostra "N de M portais considerados" quando há mais de 30 no raio (`app.js:401`).
+
+### Corrigido
+- Listas grandes: o otimizador considera no máximo 30 portais por cálculo, com chave e mais próximos primeiro (`optimizer.js:15`, `optimizer.js:63-72`). O fanfield passa a respeitar o prazo: testa âncoras com mais chaves primeiro e, no modo automático, usa no máximo metade do orçamento (`optimizer.js:305-310`, `optimizer.js:385`).
+- Campos extras dos arquivos importados, como cor ou facção, não são armazenados (`sanitizePortal`, `app.js:64`).
+
+### Documentação
+- README: a regra 5 da política de conformidade passa a descrever a origem dos dados (digitados, link colado ou arquivo que o usuário prepara e importa, inclusive coordenadas estimadas de prints; o app não captura tela nem lê serviços do jogo).
+- README: nova regra 6, "O plano não substitui o jogo", e descarte de campos extras na regra 4, com linha na tabela de garantias.
+- README: nota sobre listas grandes (máx. 30 portais, conferir coordenadas estimadas).
+
 ## [1.2.2] — 2026-11-14
 ### Adicionado
 - Atualização automática: o service worker serve os arquivos de um cache por `VERSION`, sem misturar versões. A instalação baixa tudo com `cache: 'reload'`, o registro usa `updateViaCache: 'none'`, e o app procura versão nova ao abrir, ao voltar para o app e a cada 30 min (`sw.js:25-28`, `app.js:1029-1032`).
