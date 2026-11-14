@@ -48,3 +48,14 @@ test('CSP da página só permite rede para tiles do OSM', () => {
   const hosts = csp.match(/https:\/\/[^\s;]+/g) || [];
   for (const h of hosts) assert.match(h, /tile\.openstreetmap\.org$/, `host inesperado na CSP: ${h}`);
 });
+
+// O service worker serve o app de um cache por VERSION: publicar código sem trocar a VERSION do
+// sw.js deixaria os usuários presos na versão antiga.
+test('VERSION do app.js e do sw.js andam juntas', () => {
+  const root = path.join(__dirname, '..');
+  const app = fs.readFileSync(path.join(root, 'app.js'), 'utf8').match(/var VERSION = '([^']+)'/)[1];
+  const sw = fs.readFileSync(path.join(root, 'sw.js'), 'utf8').match(/var VERSION = 'fp-v([^']+)'/)[1];
+  const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
+  assert.equal(sw, app, 'sw.js e app.js com VERSION diferentes');
+  assert.equal(pkg, app, 'package.json e app.js com versão diferente');
+});

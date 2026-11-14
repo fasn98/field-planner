@@ -8,7 +8,7 @@
   'use strict';
 
   var STORE = 'fieldplanner.v1';
-  var VERSION = '1.2.1';
+  var VERSION = '1.2.2';
   // Qualquer string de 1–64 caracteres sem controle. A segurança contra "constructor"/"__proto__"
   // vem dos mapas sem protótipo; filtrar mais trocaria ids e órfãos bloqueadores/links feitos.
   var ID_RE = /^[^\u0000-\u001f\u007f]{1,64}$/;
@@ -49,7 +49,7 @@
   }
   function save() {
     try { localStorage.setItem(STORE, JSON.stringify(db)); }
-    catch (e) { toast('Não foi possível salvar (armazenamento cheio?)'); }
+    catch (e) { toastError('Não foi possível salvar (armazenamento cheio?)'); }
   }
 
   function newId() {
@@ -63,7 +63,11 @@
   }
   function sanitizePortal(p) {
     if (!p || typeof p !== 'object') return null;
-    var lat = Number(p.lat), lng = Number(p.lng);
+    // aceita lat/lng (padrão do app) e latitude/longitude ou lon (outros arquivos)
+    var rawLat = p.lat != null ? p.lat : p.latitude;
+    var rawLng = p.lng != null ? p.lng : (p.lon != null ? p.lon : p.longitude);
+    if (rawLat == null || rawLng == null || String(rawLat).trim() === '' || String(rawLng).trim() === '') return null; // "" não vira 0
+    var lat = Number(rawLat), lng = Number(rawLng);
     if (!isFinite(lat) || !isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
     return {
       id: typeof p.id === 'string' && ID_RE.test(p.id) ? p.id : newId(),
@@ -133,6 +137,9 @@
     clearTimeout(toastTimer);
     toastTimer = setTimeout(function () { t.style.display = 'none'; }, ms || 2600);
   }
+  /** Erros ficam 10 s na tela (ou até tocar). */
+  function toastError(msg) { toast('⚠ ' + msg, 10000); }
+  $('#toast').addEventListener('click', function () { this.style.display = 'none'; });
   function levelBadge(n) {
     return el('span', { class: 'lv', text: 'L' + n, style: 'background:' + LEVEL_COLORS[n - 1] });
   }
@@ -306,7 +313,7 @@
     busy = false;
     $('#optBtn').disabled = false;
     $('#optBtn').textContent = 'Calcular plano';
-    toast('Falha ao carregar o otimizador' + (e && e.message ? ': ' + e.message : ''), 5000);
+    toastError('Falha ao carregar o otimizador' + (e && e.message ? ': ' + e.message : ''));
   };
   if (worker) worker.onmessage = function (e) {
     var m = e.data;
@@ -314,7 +321,7 @@
     busy = false;
     $('#optBtn').disabled = false;
     $('#optBtn').textContent = 'Calcular plano';
-    if (m.type === 'error') { toast('Erro no otimizador: ' + m.error, 5000); return; }
+    if (m.type === 'error') { toastError('Erro no otimizador: ' + m.error); return; }
     plan = m.result;
     plan.reason = pendingReason;
     renderAll();
@@ -395,7 +402,20 @@
     out.appendChild(el('p', { class: 'muted small', text: meta }));
 
     if (!plan.links.length) {
-      out.appendChild(el('p', { class: 'muted', text: 'Nenhum link possível. Verifique chaves, níveis, raio e bloqueadores.' }));
+      out.appendChild(el('p', { class: 'muted', text: 'Nenhum link possível.' }));
+      // diz qual é o motivo mais provável, em vez de uma lista genérica
+      // só os portais que entram no cálculo (dentro do raio, quando há GPS)
+      var noRaio = db.portals.filter(function (p) { return !lastOptPos || FPGeo.haversine(lastOptPos, p) <= db.settings.radius; });
+      var semChave = noRaio.filter(function (p) { return !p.chaves; }).length;
+      var nivel1 = noRaio.filter(function (p) { return p.nivel === 1; }).length;
+      var dicas = el('ul', { class: 'list' });
+      if (semChave) dicas.appendChild(el('li', { class: 'nokey', text: semChave === noRaio.length
+        ? 'Nenhum portal tem chave cadastrada. Cada link precisa de uma chave do portal de destino: na aba Portais, use 🔑 + para informar quantas chaves você tem.'
+        : semChave + ' portal(is) sem chave não podem receber links. Ajuste em Portais → 🔑 Chaves.' }));
+      if (nivel1) dicas.appendChild(el('li', { text: nivel1 + ' portal(is) estão como L1 (alcance de só 160 m). Toque no nome do portal, em Portais, para informar o nível real.' }));
+      if (plan.candidates < 3) dicas.appendChild(el('li', { text: 'Só ' + plan.candidates + ' portal(is) dentro do raio a pé de ' + fmtDist(db.settings.radius) + '.' }));
+      if (dicas.childNodes.length) out.appendChild(dicas);
+      else out.appendChild(el('p', { class: 'muted small', text: 'Verifique os bloqueadores e o limite de links de saída.' }));
     } else {
       out.appendChild(el('h3', { text: 'Passos' }));
       var ol = el('ol', { class: 'steps' });
@@ -443,15 +463,20 @@
     var list = db.portals.slice().sort(function (a, b) { return a.nome.localeCompare(b.nome, 'pt-BR'); });
     if (pos) list.sort(function (a, b) { return FPGeo.haversine(pos, a) - FPGeo.haversine(pos, b); });
     list.filter(function (p) { return !q || p.nome.toLowerCase().indexOf(q) >= 0; }).forEach(function (p) {
-      var keysBox = el('div', { class: 'keys' }, [
-        el('button', { 'aria-label': 'Menos uma chave', text: '−', onclick: function (e) { e.stopPropagation(); bumpKeys(p, -1); } }),
-        el('b', { text: String(p.chaves) }),
-        el('button', { 'aria-label': 'Mais uma chave', text: '+', onclick: function (e) { e.stopPropagation(); bumpKeys(p, 1); } })
+      var keysBox = el('div', { class: 'keys-wrap' }, [
+        el('span', { class: 'keys-label', text: '🔑 Chaves' }),
+        el('div', { class: 'keys' }, [
+          el('button', { 'aria-label': 'Menos uma chave de ' + p.nome, text: '−', onclick: function (e) { e.stopPropagation(); bumpKeys(p, -1); } }),
+          el('b', { class: p.chaves ? '' : 'zero', text: String(p.chaves) }),
+          el('button', { 'aria-label': 'Mais uma chave de ' + p.nome, text: '+', onclick: function (e) { e.stopPropagation(); bumpKeys(p, 1); } })
+        ])
       ]);
-      var info = el('div', { class: 'grow' }, [
-        el('div', { class: 'name', text: p.nome }),
-        el('div', { class: 'muted small', text: (pos ? fmtDist(FPGeo.haversine(pos, p)) + ' · ' : '') + p.chaves + ' chave(s)' + (p.observacao ? ' · ' + p.observacao : '') })
+      var meta = el('div', { class: 'muted small' }, [
+        (pos ? fmtDist(FPGeo.haversine(pos, p)) + ' · ' : '') + 'Nível ' + p.nivel + ' · alcance ' + fmtDist(FPGeo.linkRange(p.nivel)),
+        p.chaves ? null : el('span', { class: 'nokey', text: ' · sem chave: não recebe links' }),
+        p.observacao ? ' · ' + p.observacao : null
       ]);
+      var info = el('div', { class: 'grow' }, [el('div', { class: 'name', text: p.nome }), meta]);
       var li = el('li', { class: 'item' }, [levelBadge(p.nivel), info, keysBox]);
       info.addEventListener('click', function () { map.setView([p.lat, p.lng], Math.max(map.getZoom(), 17)); openPortalDlg(p); });
       ul.appendChild(li);
@@ -621,7 +646,7 @@
     e.target.value = '';
     if (!file) return;
     if (file.size > 5 * 1024 * 1024) { toast('Arquivo grande demais (máx. 5 MB)'); return; }
-    file.text().then(importJsonText).catch(function (err) { toast('JSON inválido: ' + err.message, 4000); });
+    file.text().then(importJsonText).catch(function (err) { toastError('JSON inválido: ' + err.message); });
   });
 
   /** Importa o JSON do app (ou um array de portais). Lança erro se o formato for desconhecido. */
@@ -629,10 +654,19 @@
     var data = JSON.parse(txt);
     var portals = Array.isArray(data) ? data : (data.portals || data.portais); // aceita a chave em português
     if (!Array.isArray(portals)) throw new Error('formato desconhecido');
-    var added = 0, updated = 0;
-    portals.map(sanitizePortal).filter(Boolean).forEach(function (p) {
-      var ex = portalById(p.id);
-      if (ex) { Object.assign(ex, p); updated++; } else { db.portals.push(p); added++; }
+    var added = 0, updated = 0, kept = 0;
+    portals.forEach(function (raw) {
+      var p = sanitizePortal(raw);
+      if (!p) return;
+      var hasId = raw && typeof raw.id === 'string' && ID_RE.test(raw.id);
+      var ex = hasId ? portalById(p.id) : null;
+      if (ex) { Object.assign(ex, p); updated++; return; } // exportado pelo app: atualiza tudo
+      if (!hasId) {
+        // sem id (arquivo feito à mão): mesmo lugar = mesmo portal; mantém chaves/nível já ajustados
+        var near = db.portals.filter(function (q) { return FPGeo.haversine(q, p) < DUP_M; })[0];
+        if (near) { kept++; return; }
+      }
+      db.portals.push(p); added++;
     });
     var ids = idSet(db.portals);
     var nb = 0, have = Object.create(null);
@@ -663,7 +697,7 @@
     save();
     if (db.portals.length) map.fitBounds(L.latLngBounds(db.portals.map(function (p) { return [p.lat, p.lng]; })).pad(0.2));
     invalidatePlan();
-    toast('Importado: ' + added + ' novo(s), ' + updated + ' atualizado(s), ' + nb + ' bloqueador(es)', 4000);
+    toast('Importado: ' + added + ' novo(s), ' + updated + ' atualizado(s)' + (kept ? ', ' + kept + ' já existente(s) mantido(s)' : '') + ', ' + nb + ' bloqueador(es)', 5000);
   }
 
   /* ------------------------------------------------------------ */
@@ -695,13 +729,13 @@
         try { JSON.parse(t); } catch (err) { t = null; }
         if (t !== null) {
           $('#bulkDlg').close('cancel');
-          try { importJsonText(txt); } catch (err) { toast('JSON inválido: ' + err.message, 4000); }
+          try { importJsonText(txt); } catch (err) { toastError('JSON inválido: ' + err.message); }
           return;
         }
       }
       bulkForm.text.value = txt;
       parseBulkText();
-    }).catch(function (err) { toast('Não foi possível ler o arquivo: ' + err.message, 4000); });
+    }).catch(function (err) { toastError('Não foi possível ler o arquivo: ' + err.message); });
   });
   $('#bulkParseBtn').addEventListener('click', parseBulkText);
   // Enter em qualquer campo de uma linha não submete: o botão padrão do form é "Cancelar"
@@ -991,7 +1025,23 @@
 
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(function () {});
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-    navigator.serviceWorker.register('sw.js').catch(function (e) { console.warn('[FP] SW não registrado', e); });
+    var hadController = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(function (reg) {
+      // procura versão nova ao voltar para o app e a cada 30 min
+      document.addEventListener('visibilitychange', function () { if (!document.hidden) reg.update().catch(function () {}); });
+      setInterval(function () { reg.update().catch(function () {}); }, 30 * 60 * 1000);
+    }).catch(function (e) { console.warn('[FP] SW não registrado', e); });
+    // Versão nova assumiu: avisa (não recarrega sozinho para não interromper o modo em campo)
+    navigator.serviceWorker.addEventListener('controllerchange', function () {
+      if (!hadController) { hadController = true; return; } // primeira instalação, nada a avisar
+      var justOpened = performance.now() < 20000;
+      var busyUi = fieldMode || plan || document.querySelector('dialog[open]'); // plano só existe em memória
+      if (justOpened && !busyUi) { location.reload(); return; } // acabou de abrir: troca já
+      var bar = $('#updateBar');
+      if (bar) bar.hidden = false;
+    });
+    var updBar = $('#updateBar');
+    if (updBar) updBar.addEventListener('click', function () { location.reload(); });
   }
 
   renderAll();

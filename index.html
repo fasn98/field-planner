@@ -75,6 +75,7 @@
   .stat b { display: block; font-size: 20px; }
   .stat span { font-size: 11px; color: var(--muted); }
   ol.steps, ul.list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+  ol.steps li, ul.list li { min-width: 0; } /* nome comprido não alarga a linha além da tela */
   ol.steps li, ul.list li { background: var(--panel2); border-radius: 10px; padding: 10px 12px; }
   ol.steps li.done { opacity: .5; }
   .num { display: inline-grid; place-items: center; min-width: 24px; height: 24px; border-radius: 12px; background: var(--accent); color: var(--accent-ink); font-size: 12px; font-weight: 700; padding: 0 6px; margin-right: 4px; }
@@ -84,7 +85,11 @@
   .item .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .keys { display: flex; align-items: center; gap: 4px; }
   .keys button { width: 40px; height: 40px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); font-size: 20px; }
-  .keys b { min-width: 28px; text-align: center; }
+  .keys b { min-width: 32px; text-align: center; font-size: 18px; }
+  .keys b.zero { color: var(--bad); }
+  .keys-wrap { display: grid; justify-items: center; gap: 2px; flex-shrink: 0; }
+  .keys-label { font-size: 11px; color: var(--muted); white-space: nowrap; }
+  .nokey { color: var(--bad); }
   h3 { margin: 14px 0 6px; font-size: 15px; }
   table { width: 100%; border-collapse: collapse; font-size: 14px; }
   td, th { padding: 6px 4px; border-bottom: 1px solid var(--line); text-align: left; }
@@ -120,6 +125,11 @@
   .bulk-row .meta { grid-column: 2; font-size: 12px; color: var(--muted); }
   .bulk-row .meta.bad { color: var(--bad); } .bulk-row .meta.warn { color: var(--warn); }
   code { font-size: 12px; background: var(--bg); padding: 1px 4px; border-radius: 4px; word-break: break-all; }
+  #toast { cursor: pointer; }
+  #updateBar { position: fixed; left: 50%; top: calc(52px + env(safe-area-inset-top, 0px)); transform: translateX(-50%); z-index: 2100;
+    min-height: 48px; padding: 0 18px; border-radius: 24px; border: 0; background: var(--accent); color: var(--accent-ink); font-weight: 700;
+    box-shadow: 0 4px 16px rgba(0,0,0,.5); max-width: 92vw; }
+  #updateBar[hidden] { display: none; }
   .fab { position: fixed; right: 12px; z-index: 1000; width: 52px; height: 52px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); font-size: 22px; }
 </style>
 </head>
@@ -179,7 +189,9 @@
       </div>
       <div class="row"><button id="bulkBtn" class="btn grow">Importar lista de links</button></div>
       <input id="search" type="search" placeholder="Buscar portal…" aria-label="Buscar portal">
-      <p class="muted small">Toque longo no mapa também adiciona um portal no ponto.</p>
+      <p class="muted small">Cada linha é um portal. Em <b>🔑 Chaves</b>, informe quantas chaves desse portal você tem:
+        cada link <i>para</i> ele gasta uma, e portal sem chave não recebe link. Toque no nome para mudar o nível.
+        Toque longo no mapa adiciona um portal no ponto.</p>
       <ul id="portalList" class="list"></ul>
     </section>
 
@@ -341,6 +353,7 @@
 </dialog>
 
 <div id="toast" role="status"></div>
+<button id="updateBar" hidden>Nova versão disponível — toque para atualizar</button>
 
 <script src="vendor/leaflet/leaflet.js"></script>
 <script src="geo.js"></script>

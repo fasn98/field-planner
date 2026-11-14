@@ -1,10 +1,13 @@
 /*
  * Field Planner — service worker (offline-first).
- * App shell: cache-first, pré-carregado na instalação.
+ * App shell: cache-first por VERSION (nunca mistura arquivos de versões diferentes). A página
+ * procura sw.js novo ao abrir, ao voltar ao primeiro plano e a cada 30 min; o SW novo baixa tudo
+ * ignorando o cache HTTP e assume na hora. A página então recarrega sozinha (se acabou de abrir e
+ * não está no modo em campo) ou mostra "Nova versão disponível".
  * Tiles OSM: cache-first com rede como fallback, só os que você já visualizou (sem download em massa,
  * conforme a política de uso de tiles do OSM). Qualquer outra origem: não intercepta.
  */
-var VERSION = 'fp-v1.2.1';
+var VERSION = 'fp-v1.2.2';
 var SHELL = 'shell-' + VERSION;
 var TILES = 'tiles-v2'; // v1 guardava respostas opacas, incompatíveis com requests CORS
 var TILE_HOST = 'tile.openstreetmap.org';
@@ -19,7 +22,10 @@ var ASSETS = [
 ];
 
 self.addEventListener('install', function (e) {
-  e.waitUntil(caches.open(SHELL).then(function (c) { return c.addAll(ASSETS); }).then(function () { return self.skipWaiting(); }));
+  // cache: 'reload' ignora o cache HTTP do navegador (o GitHub Pages manda max-age=600)
+  e.waitUntil(caches.open(SHELL).then(function (c) {
+    return c.addAll(ASSETS.map(function (u) { return new Request(u, { cache: 'reload' }); }));
+  }).then(function () { return self.skipWaiting(); }));
 });
 
 self.addEventListener('activate', function (e) {
@@ -46,9 +52,13 @@ self.addEventListener('fetch', function (e) {
   var url = new URL(req.url);
 
   if (url.origin === self.location.origin) {
-    e.respondWith(caches.match(req, { ignoreSearch: true }).then(function (hit) {
-      return hit || fetch(req).catch(function () {
-        return req.mode === 'navigate' ? caches.match('index.html') : Response.error();
+    // cache-first, coerente por VERSION: todos os arquivos do app vêm sempre da mesma versão.
+    // Versão nova = sw.js novo, que baixa tudo de novo na instalação (cache: 'reload').
+    e.respondWith(caches.open(SHELL).then(function (c) {
+      return c.match(req, { ignoreSearch: true }).then(function (hit) {
+        return hit || fetch(req).catch(function () {
+          return req.mode === 'navigate' ? c.match('index.html') : Response.error();
+        });
       });
     }));
     return;
