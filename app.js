@@ -8,7 +8,7 @@
   'use strict';
 
   var STORE = 'fieldplanner.v1';
-  var VERSION = '1.2.0';
+  var VERSION = '1.2.1';
   // Qualquer string de 1–64 caracteres sem controle. A segurança contra "constructor"/"__proto__"
   // vem dos mapas sem protótipo; filtrar mais trocaria ids e órfãos bloqueadores/links feitos.
   var ID_RE = /^[^\u0000-\u001f\u007f]{1,64}$/;
@@ -627,7 +627,7 @@
   /** Importa o JSON do app (ou um array de portais). Lança erro se o formato for desconhecido. */
   function importJsonText(txt) {
     var data = JSON.parse(txt);
-    var portals = Array.isArray(data) ? data : data.portals;
+    var portals = Array.isArray(data) ? data : (data.portals || data.portais); // aceita a chave em português
     if (!Array.isArray(portals)) throw new Error('formato desconhecido');
     var added = 0, updated = 0;
     portals.map(sanitizePortal).filter(Boolean).forEach(function (p) {
