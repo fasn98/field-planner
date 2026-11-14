@@ -2,6 +2,10 @@
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Datas no formato AAAA-MM-DD.
 
+## [1.3.1] — 2026-11-14
+### Alterado
+- Texto de conformidade na aba Ajustes alinhado à política do README: portais inseridos pelo usuário (digitados, links colados ou arquivos importados); o plano só simula. **Não revisado:** mudança só de texto.
+
 ## [1.3.0] — 2026-11-14
 ### Adicionado
 - "Simular sem chaves" em Ajustes: mostra o melhor plano pela posição dos portais e a lista de farm (chaves que faltam por portal, com total). O modo em campo fica desabilitado na simulação (`app.js:354`, `app.js:400`).
