@@ -1,28 +1,26 @@
-# Handoff: claude → reviewer — fim do cache "eterno" (v1.2.2)
+# Handoff claude → reviewer — v1.6.0 mover/excluir portal no mapa
 
 ## Entregue
-- `sw.js`:
-  - o shell da própria origem agora é "rede primeiro" (`networkFirst`): `fetch(req, {cache:'no-cache'})`, com o cache como reserva se a rede falhar ou demorar mais de 3 s (`NET_TIMEOUT_MS`);
-  - a instalação baixa os arquivos com `cache:'reload'`;
-  - os tiles não mudaram.
-- `app.js`:
-  - o registro usa `updateViaCache:'none'`;
-  - `reg.update()` roda quando o app volta ao primeiro plano e a cada 30 min;
-  - no `controllerchange`, aparece o botão `#updateBar` ("Nova versão disponível"); não recarrega sozinho;
-  - `toastError` mostra o erro por 10 s e some ao toque.
-- `index.html`: `#updateBar` e o estilo dele.
-- VERSION 1.2.2 em `app.js`, `sw.js` e `package.json`.
+- `app.js`: modo "mover portal" (`startMove`/`endMove`, botão `#moveDelete`), guarda `moving` no clique de portal, no `contextmenu` do mapa e no `controllerchange` do service worker; VERSION 1.6.0.
+- `index.html`: botão `#portalMove` no diálogo do portal, barra `#moveBar` (Cancelar / Excluir / Salvar posição), estilos `.move-pin`, `#moveBar`.
+- `sw.js`, `package.json`: versão 1.6.0.
+- Sem ADR (feature pequena de UI, reversível).
 
-Verificado com `npm test` 60/60 e com uma simulação no Chrome headless servindo uma cópia do site:
-- deploy só do `app.js`: chega com 1 recarga;
-- deploy com `sw.js` novo: o aviso aparece sem recarregar, e tocar nele carrega a versão nova;
-- offline: o app carrega do cache.
-0 exceções.
+## Testes
+- `npm test`: 81 passando, 0 falhas.
+- Smoke em Chrome headless 412×860 (script no scratchpad `mover.mjs`): abrir diálogo → Mover → arrastar 60 px (33 m) → Cancelar não grava; tocar no mapa (125 m) → Salvar grava e mostra toast; Excluir pela barra pede confirmação e remove; 0 exceções.
+- Não testado em celular real (toque/arraste com dedo).
 
 ## O que falta
-- Revisar `networkFirst`: corrida rede × timeout; caso sem cache e sem rede; requisições da própria origem com querystring (`ignoreSearch` no match).
-- Conformidade: nenhuma origem nova.
+- Revisão de código/segurança (nome do portal vai para `textContent`; `confirmDialog` usa `textContent`).
+- CHANGELOG/README depois da revisão.
 
 ## Riscos
-- Quem tem a v1.2.1 (cache-first) ainda precisa de uma recarga extra para a v1.2.2 assumir.
-- Com rede lenta, a abertura pode esperar até 3 s antes de cair no cache.
+- Durante o modo mover, o clique no mapa move o pino; se o modo em campo estiver ativo, salvar recalcula o plano (`invalidatePlan`).
+
+## Resultado da revisão (reviewer): APROVADO COM RESSALVAS — corrigidas
+- IMPORTANTE `startMove` sem encerrar mover anterior (telas largas) → `startMove` chama `endMove(false)` primeiro.
+- NOTA apagar tudo / desfazer importação / excluir durante mover → `removePortals` e `#wipeBtn` encerram o mover.
+- NOTA longitude fora de ±180 → `getLatLng().wrap()`.
+- NOTA tocar em cima de outro portal não move o pino → mantido (usabilidade, sem mudança).
+- Depois das correções: `npm test` 81/81, smoke `mover.mjs` sem exceções.

@@ -137,6 +137,12 @@
     min-height: 48px; padding: 0 18px; border-radius: 24px; border: 0; background: var(--accent); color: var(--accent-ink); font-weight: 700;
     box-shadow: 0 4px 16px rgba(0,0,0,.5); max-width: 92vw; }
   #updateBar[hidden] { display: none; }
+  #moveBar { position: fixed; left: 12px; right: 12px; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); z-index: 2050; background: var(--panel);
+    border: 1px solid var(--warn); border-radius: 14px; padding: 10px 12px; box-shadow: 0 4px 16px rgba(0,0,0,.5); max-width: 520px; margin: 0 auto; }
+  #moveBar[hidden] { display: none; }
+  .move-hint { font-size: 13px; color: var(--muted); }
+  .move-info { font-weight: 700; margin: 2px 0 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .move-pin { width: 28px; height: 28px; border-radius: 50%; background: rgba(210,153,34,.35); border: 3px solid #d29922; box-shadow: 0 0 0 2px #0d1117; }
   .sim-toggle { display: flex; gap: 10px; align-items: flex-start; margin: 10px 0; padding: 10px 12px; background: var(--panel2); border-radius: 12px; cursor: pointer; }
   .sim-toggle input { width: 24px; min-height: 24px; margin-top: 2px; flex-shrink: 0; }
   .sim-banner { background: rgba(210,153,34,.15); border: 1px solid var(--warn); color: var(--text); border-radius: 12px; padding: 10px 12px; margin: 8px 0; font-size: 14px; }
@@ -281,6 +287,7 @@
     <label class="f">Observação<textarea name="observacao" maxlength="300" placeholder="Ex.: chave no ponto de ônibus. Não registre nomes de agentes."></textarea></label>
     <div class="row">
       <button value="delete" id="portalDelete" class="btn bad sm" formnovalidate>Excluir</button>
+      <button value="move" id="portalMove" class="btn ghost sm" formnovalidate>📍 Mover no mapa</button>
       <span class="spacer"></span>
       <button value="cancel" class="btn ghost" formnovalidate>Cancelar</button>
       <button value="save" class="btn primary">Salvar</button>
@@ -371,6 +378,11 @@
 </dialog>
 
 <div id="toast" role="status"></div>
+<div id="moveBar" hidden>
+  <div class="move-hint">Arraste o pino ou toque no lugar certo</div>
+  <div id="moveInfo" class="move-info"></div>
+  <div class="row"><button id="moveCancel" class="btn ghost sm">Cancelar</button><button id="moveDelete" class="btn bad sm">Excluir</button><span class="spacer"></span><button id="moveSave" class="btn primary sm">Salvar posição</button></div>
+</div>
 <button id="updateBar" hidden>Nova versão disponível — toque para atualizar</button>
 
 <script src="vendor/leaflet/leaflet.js"></script>

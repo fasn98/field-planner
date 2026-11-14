@@ -8,7 +8,7 @@
   'use strict';
 
   var STORE = 'fieldplanner.v1';
-  var VERSION = '1.5.0';
+  var VERSION = '1.6.0';
   // Qualquer string de 1–64 caracteres sem controle. A segurança contra "constructor"/"__proto__"
   // vem dos mapas sem protótipo; filtrar mais trocaria ids e órfãos bloqueadores/links feitos.
   var ID_RE = /^[^\u0000-\u001f\u007f]{1,64}$/;
@@ -197,7 +197,7 @@
   }
 
   // Toque longo (ou clique direito) adiciona portal no ponto.
-  map.on('contextmenu', function (e) { openPortalDlg(null, e.latlng); });
+  map.on('contextmenu', function (e) { if (!moving) openPortalDlg(null, e.latlng); });
 
   function renderPortals() {
     portalLayer.clearLayers();
@@ -210,7 +210,7 @@
       });
       if (inPlan[p.id]) m.bindTooltip(esc(p.nome) + ' · 🔑' + p.chaves, { permanent: true, direction: 'right', offset: [8, 0], className: 'plabel' });
       else m.bindTooltip(esc(p.nome) + ' · L' + p.nivel + ' · ' + p.chaves + ' 🔑', { direction: 'top', offset: [0, -8] });
-      m.on('click', function () { openPortalDlg(p); });
+      m.on('click', function () { if (!moving) openPortalDlg(p); });
       m.addTo(portalLayer);
     });
   }
@@ -582,6 +582,7 @@
     var f = $('#portalForm').elements;
     $('#portalDlgTitle').textContent = p ? 'Editar portal' : 'Novo portal';
     $('#portalDelete').hidden = !p;
+    $('#portalMove').hidden = !p;
     f.nome.value = p ? p.nome : (prefill && prefill.nome) || '';
     f.link.value = '';
     var ll = p || latlng || (prefill && prefill.coords) || null;
@@ -611,6 +612,8 @@
       save();
       invalidatePlan();
       toast(editing ? 'Portal atualizado' : 'Portal adicionado');
+    } else if (v === 'move' && editing) {
+      startMove(editing);
     } else if (v === 'delete' && editing) {
       var id = editing.id, name = editing.nome;
       confirmDialog('Excluir portal', 'Excluir “' + name + '” e links associados?').then(function (ok) {
@@ -641,6 +644,62 @@
     if (!c) { toast('Não encontrei coordenadas nesse texto. Digite lat/lng manualmente.', 4000); return; }
     map.setView([c.lat, c.lng], 17);
     openPortalDlg(null, null, { coords: c });
+  });
+
+  // Mover portal no mapa: arrastar o marcador ou tocar no ponto certo.
+  // Útil para corrigir posições vindas de importação crua (print de mapa).
+  var moving = null;
+  function startMove(p) {
+    endMove(false); // nunca dois pinos ao mesmo tempo
+    var orig = { lat: p.lat, lng: p.lng };
+    var mk = L.marker([p.lat, p.lng], { draggable: true, autoPan: true, zIndexOffset: 2000,
+      icon: L.divIcon({ className: '', html: '<div class="move-pin"></div>', iconSize: [28, 28], iconAnchor: [14, 14] }) }).addTo(map);
+    var ghost = L.polyline([[orig.lat, orig.lng], [orig.lat, orig.lng]], { color: '#d29922', weight: 2, dashArray: '4 4', interactive: false }).addTo(map);
+    moving = { p: p, orig: orig, mk: mk, ghost: ghost };
+    function upd() {
+      var ll = mk.getLatLng();
+      ghost.setLatLngs([[orig.lat, orig.lng], ll]);
+      var d = FPGeo.haversine(orig, { lat: ll.lat, lng: ll.lng });
+      $('#moveInfo').textContent = p.nome + (d >= 1 ? ' · ' + (d < 1000 ? Math.round(d) + ' m' : (d / 1000).toFixed(2) + ' km') : '');
+    }
+    mk.on('drag dragend', upd);
+    moving.onMapClick = function (e) { mk.setLatLng(e.latlng); upd(); };
+    map.on('click', moving.onMapClick);
+    sheet.classList.add('min');
+    map.setView([p.lat, p.lng], Math.max(map.getZoom(), 18));
+    $('#moveBar').hidden = false;
+    upd();
+  }
+  function endMove(saveIt) {
+    if (!moving) return;
+    var m = moving; moving = null;
+    var ll = m.mk.getLatLng().wrap();
+    map.off('click', m.onMapClick);
+    map.removeLayer(m.mk); map.removeLayer(m.ghost);
+    $('#moveBar').hidden = true;
+    if (!saveIt) return;
+    var data = sanitizePortal(Object.assign({}, m.p, { lat: ll.lat, lng: ll.lng }));
+    if (!data) { toast('Coordenadas inválidas'); return; }
+    if (data.lat === m.orig.lat && data.lng === m.orig.lng) return;
+    m.p.lat = data.lat; m.p.lng = data.lng;
+    save();
+    invalidatePlan();
+    toast('Posição atualizada');
+  }
+  $('#moveSave').addEventListener('click', function () { endMove(true); });
+  $('#moveCancel').addEventListener('click', function () { endMove(false); });
+  $('#moveDelete').addEventListener('click', function () {
+    if (!moving) return;
+    var p = moving.p;
+    confirmDialog('Excluir portal', 'Excluir “' + p.nome + '” e links associados?').then(function (ok) {
+      if (!ok) return;
+      endMove(false);
+      var gone = Object.create(null); gone[p.id] = true;
+      removePortals(gone);
+      save();
+      invalidatePlan();
+      toast('Portal excluído');
+    });
   });
 
   // Mudança de dados invalida o plano (recalcula se já havia um).
@@ -830,6 +889,7 @@
 
   /** Remove portais (conjunto de ids) e tudo que aponta para eles. */
   function removePortals(gone) {
+    if (moving && gone[moving.p.id]) endMove(false);
     db.portals = db.portals.filter(function (p) { return !gone[p.id]; });
     db.blockers = db.blockers.filter(function (b) { return !gone[b.portalA] && !gone[b.portalB]; });
     db.done = db.done.filter(function (d) { return !gone[d.from] && !gone[d.to]; });
@@ -1006,6 +1066,7 @@
   $('#wipeBtn').addEventListener('click', function () {
     confirmDialog('Apagar tudo', 'Remove todos os portais, bloqueadores e configurações deste aparelho. Exporte antes se quiser guardar.').then(function (ok) {
       if (!ok) return;
+      endMove(false);
       db = emptyDb(); plan = null; undoStack = [];
       save();
       setFieldMode(false);
@@ -1192,7 +1253,7 @@
     navigator.serviceWorker.addEventListener('controllerchange', function () {
       if (!hadController) { hadController = true; return; } // primeira instalação, nada a avisar
       var justOpened = performance.now() < 20000;
-      var busyUi = fieldMode || plan || document.querySelector('dialog[open]'); // plano só existe em memória
+      var busyUi = fieldMode || plan || moving || document.querySelector('dialog[open]'); // plano só existe em memória
       if (justOpened && !busyUi) { location.reload(); return; } // acabou de abrir: troca já
       var bar = $('#updateBar');
       if (bar) bar.hidden = false;

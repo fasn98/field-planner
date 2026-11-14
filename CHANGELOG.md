@@ -2,7 +2,12 @@
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Datas no formato AAAA-MM-DD.
 
-## [1.5.0] — 2026-11-14
+## [1.6.0] — 2026-11-14
+### Adicionado
+- **Mover portal no mapa**: no diálogo do portal, "📍 Mover no mapa" abre um pino que dá para arrastar, ou basta tocar no lugar certo. A barra mostra a distância do ajuste e tem Cancelar / Salvar posição. Serve para corrigir posições de importações cruas (prints de mapa).
+- **Excluir** direto pela barra de mover (com confirmação), para limpar pontos falsos rapidamente.
+
+ — 2026-11-14
 ### Adicionado
 - **Desfazer última importação** (Ajustes): remove os portais adicionados na última importação (arquivo JSON ou lista de links), com bloqueadores e links feitos ligados a eles. Atualizações de portais existentes e configurações vindas do arquivo não são revertidas. Só 1 nível.
 - Confirmação antes de importar arquivos com mais de 300 pontos, com aviso sobre ruído em listas detectadas de prints.
