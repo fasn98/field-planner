@@ -235,8 +235,37 @@
     return out;
   }
 
+  /*
+   * Tempo estimado de um plano (minutos), sem serviço de rotas: cada trecho é a distância em linha reta
+   * × fator de desvio das ruas. Hipóteses (aproximadas, ajustáveis aqui):
+   * - a pé: 4,5 km/h, desvio 1,3;
+   * - carro: 20 km/h médio urbano, desvio 1,4, +3 min por parada para estacionar; trecho < 400 m vai a pé;
+   * - transporte público: 15 km/h, desvio 1,4, +10 min de espera por trecho; trecho < 1 km vai a pé;
+   * - em cada portal: 1 min por link (+1 min por parada).
+   */
+  var TRAVEL = {
+    walk: { kmh: 4.5, detour: 1.3 },
+    car: { kmh: 20, detour: 1.4, stopMin: 3, walkBelow: 400 },
+    transit: { kmh: 15, detour: 1.4, waitMin: 10, walkBelow: 1000 }
+  };
+
+  function travelTimes(legs, links) {
+    var walkMin = function (m) { return m * TRAVEL.walk.detour / 1000 / TRAVEL.walk.kmh * 60; };
+    var t = { walk: 0, car: 0, transit: 0 };
+    (legs || []).forEach(function (m) {
+      var w = walkMin(m);
+      t.walk += w;
+      t.car += m < TRAVEL.car.walkBelow ? w : m * TRAVEL.car.detour / 1000 / TRAVEL.car.kmh * 60 + TRAVEL.car.stopMin;
+      t.transit += m < TRAVEL.transit.walkBelow ? w : m * TRAVEL.transit.detour / 1000 / TRAVEL.transit.kmh * 60 + TRAVEL.transit.waitMin;
+    });
+    var action = (links || 0) * 1 + (legs || []).length * 1;
+    return { walk: Math.round(t.walk + action), car: Math.round(t.car + action), transit: Math.round(t.transit + action), action: action };
+  }
+
   return {
     R: R,
+    TRAVEL: TRAVEL,
+    travelTimes: travelTimes,
     parseBulkLine: parseBulkLine,
     parseBulk: parseBulk,
     haversine: haversine,

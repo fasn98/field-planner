@@ -117,6 +117,13 @@
   #toast { position: fixed; left: 50%; top: calc(56px + env(safe-area-inset-top, 0px)); transform: translateX(-50%); z-index: 2000;
     background: var(--panel2); border: 1px solid var(--line); padding: 10px 14px; border-radius: 12px; max-width: 90vw; display: none; }
   .lbl { background: var(--accent); color: var(--accent-ink); border-radius: 10px; font: 700 11px/18px system-ui; text-align: center; min-width: 18px; padding: 0 4px; box-shadow: 0 0 0 2px #0d1117; }
+  .route-num { background: #fbbf24; color: #1a1300; border-radius: 6px; font: 800 12px/20px system-ui; text-align: center; min-width: 20px; padding: 0 5px; box-shadow: 0 0 0 2px #0d1117; }
+  .route-num.start { background: #58a6ff; color: #fff; }
+  .leaflet-tooltip.plabel { background: rgba(13,17,23,.85); border: 0; color: #e6edf3; font: 600 11px system-ui; padding: 1px 5px; box-shadow: none; }
+  .leaflet-tooltip.plabel::before { display: none; }
+  .times { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 6px 0; }
+  .times div { background: var(--panel2); border-radius: 10px; padding: 6px; text-align: center; font-size: 13px; }
+  .times b { display: block; font-size: 16px; }
   .lbl.cur { background: #fff; color: #000; }
   .lbl.done { background: var(--muted); }
   .me { width: 18px; height: 18px; border-radius: 50%; background: #58a6ff; border: 3px solid #fff; box-shadow: 0 0 0 6px rgba(88,166,255,.25); }

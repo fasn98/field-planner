@@ -8,7 +8,7 @@
   'use strict';
 
   var STORE = 'fieldplanner.v1';
-  var VERSION = '1.3.1';
+  var VERSION = '1.4.0';
   // Qualquer string de 1–64 caracteres sem controle. A segurança contra "constructor"/"__proto__"
   // vem dos mapas sem protótipo; filtrar mais trocaria ids e órfãos bloqueadores/links feitos.
   var ID_RE = /^[^\u0000-\u001f\u007f]{1,64}$/;
@@ -130,6 +130,11 @@
     return m < 1000 ? Math.round(m) + ' m' : (m / 1000).toFixed(2).replace('.', ',') + ' km';
   }
   function fmtNum(n) { return Number(n).toLocaleString('pt-BR'); }
+  function fmtMin(min) {
+    if (min < 60) return Math.max(1, Math.round(min)) + ' min';
+    var h = Math.floor(min / 60), m = Math.round(min % 60);
+    return h + ' h' + (m ? ' ' + String(m).padStart(2, '0') : '');
+  }
   function fmtArea(m2) {
     if (!m2) return '0 m²';
     if (m2 < 10000) return fmtNum(Math.round(m2)) + ' m²';
@@ -179,6 +184,7 @@
   var blockerLayer = L.layerGroup().addTo(map);
   var doneLayer = L.layerGroup().addTo(map);
   var planLayer = L.layerGroup().addTo(map);
+  var routeLayer = L.layerGroup().addTo(map);
   var portalLayer = L.layerGroup().addTo(map);
   var meMarker = null, meAccuracy = null;
 
@@ -192,13 +198,14 @@
   function renderPortals() {
     portalLayer.clearLayers();
     var inPlan = Object.create(null);
-    if (plan) plan.steps.forEach(function (s) { inPlan[s.portal] = true; });
+    if (plan) plan.links.forEach(function (l) { inPlan[l.from] = inPlan[l.to] = true; });
     db.portals.forEach(function (p) {
       var m = L.circleMarker([p.lat, p.lng], {
         radius: inPlan[p.id] ? 11 : 8, color: '#0d1117', weight: 2,
         fillColor: LEVEL_COLORS[p.nivel - 1], fillOpacity: 0.95
       });
-      m.bindTooltip(esc(p.nome) + ' · L' + p.nivel + ' · ' + p.chaves + ' 🔑', { direction: 'top', offset: [0, -8] });
+      if (inPlan[p.id]) m.bindTooltip(esc(p.nome) + ' · 🔑' + p.chaves, { permanent: true, direction: 'right', offset: [8, 0], className: 'plabel' });
+      else m.bindTooltip(esc(p.nome) + ' · L' + p.nivel + ' · ' + p.chaves + ' 🔑', { direction: 'top', offset: [0, -8] });
       m.on('click', function () { openPortalDlg(p); });
       m.addTo(portalLayer);
     });
@@ -224,12 +231,14 @@
   function renderPlanOnMap() {
     planLayer.clearLayers();
     fieldLayer.clearLayers();
+    routeLayer.clearLayers();
     if (!plan) return;
+    // campos finais: contorno + sombra; camadas sobrepostas escurecem
     plan.fields.forEach(function (f) {
       var pts = f.portals.map(portalById);
       if (pts.some(function (p) { return !p; })) return;
       L.polygon(pts.map(function (p) { return [p.lat, p.lng]; }), {
-        color: '#2dd4bf', weight: 0, fillColor: '#2dd4bf', fillOpacity: 0.16, interactive: false
+        color: '#2dd4bf', weight: 1.5, opacity: 0.8, fillColor: '#2dd4bf', fillOpacity: 0.22, interactive: false
       }).addTo(fieldLayer);
     });
     var cur = currentLink();
@@ -240,13 +249,38 @@
       L.polyline([[a.lat, a.lng], [b.lat, b.lng]], {
         color: isCur ? '#ffffff' : '#2dd4bf', weight: isCur ? 5 : 3, opacity: 0.95, dashArray: isCur ? null : '2 6'
       }).addTo(planLayer);
-      // número no ponto a 40% do caminho (afasta rótulos de links que saem do mesmo portal)
+      // número do link a 40% do caminho (afasta rótulos de links que saem do mesmo portal)
       var mid = [a.lat + (b.lat - a.lat) * 0.4, a.lng + (b.lng - a.lng) * 0.4];
       L.marker(mid, {
         interactive: false, keyboard: false,
         icon: L.divIcon({ className: '', html: '<div class="lbl' + (isCur ? ' cur' : '') + '">' + l.n + '</div>', iconSize: [22, 18], iconAnchor: [11, 9] })
       }).addTo(planLayer);
     });
+    // rota a pé: A (posição usada no cálculo) → 1 → 2 → … na ordem dos passos
+    var route = [];
+    if (plan.origin) route.push([plan.origin.lat, plan.origin.lng]);
+    plan.steps.forEach(function (s) { var p = portalById(s.portal); if (p) route.push([p.lat, p.lng]); });
+    if (route.length > 1) L.polyline(route, { color: '#fbbf24', weight: 3, opacity: 0.9, dashArray: '8 6', interactive: false }).addTo(routeLayer);
+    var routeIcon = function (txt, cls) {
+      return L.divIcon({ className: '', html: '<div class="route-num ' + (cls || '') + '">' + txt + '</div>', iconSize: [24, 20], iconAnchor: [-6, 24] });
+    };
+    if (plan.origin) L.marker([plan.origin.lat, plan.origin.lng], { interactive: false, keyboard: false, icon: routeIcon('A', 'start') }).addTo(routeLayer);
+    plan.steps.forEach(function (s, i) {
+      var p = portalById(s.portal);
+      if (p) L.marker([p.lat, p.lng], { interactive: false, keyboard: false, zIndexOffset: 500, icon: routeIcon(String(i + 1)) }).addTo(routeLayer);
+    });
+  }
+
+  /** Recolhe o painel e enquadra rota, links e campos do plano. */
+  function showPlanOnMap() {
+    if (!plan) return;
+    var ids = Object.create(null);
+    plan.links.forEach(function (l) { ids[l.from] = ids[l.to] = true; });
+    var ll = Object.keys(ids).map(portalById).filter(Boolean).map(function (p) { return [p.lat, p.lng]; });
+    if (plan.origin) ll.push([plan.origin.lat, plan.origin.lng]);
+    if (!ll.length) return;
+    sheet.classList.add('min');
+    map.fitBounds(L.latLngBounds(ll).pad(0.15), { paddingBottomRight: [0, 80] });
   }
 
   function renderMe() {
@@ -330,17 +364,19 @@
     if (m.type === 'error') { toastError('Erro no otimizador: ' + m.error); return; }
     plan = m.result;
     plan.reason = pendingReason;
+    plan.origin = pendingOrigin; // posição usada neste cálculo (ponto A da rota)
     renderAll();
     if (pendingReason && fieldMode) toast('Plano recalculado: ' + pendingReason);
     else if (!plan.links.length) toast('Nenhum link possível com os dados atuais', 4000);
   };
 
-  var pendingReason = '';
+  var pendingReason = '', pendingOrigin = null;
   function optimize(reason) {
     if (!worker) { toast('Seu navegador não suporta Web Workers'); return; }
     if (db.portals.length < 2) { toast('Cadastre pelo menos 2 portais'); return; }
     var s = db.settings;
     lastOptPos = pos ? { lat: pos.lat, lng: pos.lng } : null;
+    pendingOrigin = lastOptPos;
     lastOptAt = Date.now();
     pendingReason = reason || '';
     busy = true;
@@ -409,6 +445,17 @@
       el('div', { class: 'stat' }, [el('b', { text: fmtDist(plan.distance) }), el('span', { text: 'a pé' })])
     ]);
     out.appendChild(stats);
+    if (plan.links.length) {
+      var tt = FPGeo.travelTimes(plan.steps.map(function (s) { return s.walk; }), plan.links.length);
+      out.appendChild(el('div', { class: 'times' }, [
+        el('div', null, [el('b', { text: fmtMin(tt.walk) }), '🚶 a pé']),
+        el('div', null, [el('b', { text: fmtMin(tt.car) }), '🚗 carro']),
+        el('div', null, [el('b', { text: fmtMin(tt.transit) }), '🚌 transporte'])
+      ]));
+      out.appendChild(el('p', { class: 'muted small', text: 'Tempo estimado: linha reta × desvio das ruas, mais ~1 min por link e por parada. ' +
+        'Não é rota real: o app não consulta serviços de rotas.' }));
+      out.appendChild(el('div', { class: 'row' }, [el('button', { class: 'btn grow', text: '🗺 Ver plano no mapa', onclick: showPlanOnMap })]));
+    }
     if (plan.simulation) {
       out.appendChild(el('div', { class: 'sim-banner', text: '🧪 Simulação: plano ideal pela posição dos portais, sem considerar suas chaves. ' +
         'Use a lista de farm abaixo para buscar as chaves; depois desligue a simulação para executar em campo.' }));
