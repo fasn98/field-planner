@@ -155,9 +155,9 @@
   #printReport { display: none; }
   @media print {
     @page { size: A4; margin: 12mm; }
-    html, body { height: auto; background: #fff !important; color: #111 !important; overflow: visible !important; }
-    body > *:not(#printReport) { display: none !important; }
-    #printReport { display: block; font: 11pt/1.35 system-ui, sans-serif; color: #111; }
+    body.printing, html:has(body.printing) { height: auto; background: #fff !important; color: #111 !important; overflow: visible !important; }
+    body.printing > *:not(#printReport) { display: none !important; }
+    body.printing #printReport { display: block; font: 11pt/1.35 system-ui, sans-serif; color: #111; }
     #printReport h1 { font-size: 18pt; margin: 0 0 2mm; }
     #printReport h2 { font-size: 13pt; margin: 6mm 0 2mm; break-after: avoid; }
     #printReport .pr-meta, #printReport .pr-note, #printReport .pr-ll { color: #555; font-size: 9pt; }

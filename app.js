@@ -540,11 +540,20 @@
   /* ------------------------------------------------------------ */
 
   var mapsMode = 'walk';
-  var MAPS_MODE_NAMES = { walk: '🚶 a pé', car: '🚗 carro', bike: '🚲 bicicleta', transit: '🚌 transporte' };
+  // sem transporte público: nesse modo o Google Maps não aceita paradas intermediárias
+  var MAPS_MODE_NAMES = { walk: '🚶 a pé', car: '🚗 carro', bike: '🚲 bicicleta' };
 
   /** Paradas do plano, na ordem, como {lat,lng,nome}. */
   function planStops() {
-    return plan ? plan.steps.map(function (s) { return portalById(s.portal); }).filter(Boolean) : [];
+    var out = [];
+    if (plan) plan.steps.forEach(function (s, i) { var p = portalById(s.portal); if (p) out.push({ lat: p.lat, lng: p.lng, step: i + 1 }); });
+    return out;
+  }
+  /** Links do Google Maps com from/to = número do passo no plano. */
+  function planMapsLinks(stops) {
+    return FPGeo.mapsRouteUrls(stops, mapsMode).map(function (r) {
+      return { url: r.url, from: stops[r.from - 1].step, to: stops[r.to - 1].step };
+    });
   }
 
   function mapsLinkEls(links, total) {
@@ -558,7 +567,7 @@
   function renderRouteExport(out) {
     var stops = planStops();
     if (!stops.length) return;
-    var links = FPGeo.mapsRouteUrls(stops, mapsMode);
+    var links = planMapsLinks(stops);
     var sel = el('select', { 'aria-label': 'Modo da rota', onchange: function (e) { mapsMode = e.target.value; renderPlanPanel(); } });
     Object.keys(MAPS_MODE_NAMES).forEach(function (k) {
       var o = el('option', { value: k, text: MAPS_MODE_NAMES[k] });
@@ -571,7 +580,8 @@
     mapsLinkEls(links, stops.length).forEach(function (a) { box.appendChild(el('div', { class: 'row' }, [a])); });
     box.appendChild(el('p', { class: 'muted small', text: (links.length > 1
       ? 'O Google Maps aceita até ' + (FPGeo.MAPS_MAX_WAYPOINTS + 1) + ' paradas por rota: abra um trecho de cada vez (cada um começa onde o anterior terminou). '
-      : '') + 'A rota parte da sua posição atual. Abrir o link é com você: o app não envia nada ao Google.' }));
+      : '') + 'A rota parte da sua posição atual. Funciona melhor no app Google Maps (no navegador do celular o Google pode aceitar menos paradas). ' +
+      'Abrir o link é com você: o app não envia nada ao Google.' }));
     box.appendChild(el('div', { class: 'row' }, [el('button', { class: 'btn grow', text: '📄 Exportar plano em PDF', onclick: printPlan })]));
     out.appendChild(box);
   }
@@ -640,8 +650,10 @@
     // escala: barra de 100/200/500 m… que caiba em ~1/4 da largura
     var opts = [50, 100, 200, 500, 1000, 2000, 5000], len = opts[0];
     opts.forEach(function (m) { if (m * k <= W / 4) len = m; });
-    svg.appendChild(svgEl('line', { x1: 14, y1: H - 14, x2: 14 + len * k, y2: H - 14, stroke: '#111', 'stroke-width': '2' }));
-    svg.appendChild(svgEl('text', { x: 14, y: H - 20, 'font-size': '10', fill: '#111' }, fmtDist(len)));
+    if (len * k <= W - 28) {
+      svg.appendChild(svgEl('line', { x1: 14, y1: H - 14, x2: 14 + len * k, y2: H - 14, stroke: '#111', 'stroke-width': '2' }));
+      svg.appendChild(svgEl('text', { x: 14, y: H - 20, 'font-size': '10', fill: '#111' }, fmtDist(len)));
+    }
     svg.appendChild(svgEl('text', { x: W - 14, y: 20, 'font-size': '12', 'text-anchor': 'end', fill: '#111' }, 'N ↑'));
     return svg;
   }
@@ -673,7 +685,7 @@
     if (stops.length) {
       r.appendChild(el('h2', { text: 'Rota no Google Maps (' + MAPS_MODE_NAMES[mapsMode].replace(/^\S+\s/, '') + ')' }));
       var ul = el('ul', { class: 'pr-links' });
-      FPGeo.mapsRouteUrls(stops, mapsMode).forEach(function (x, i, all) {
+      planMapsLinks(stops).forEach(function (x, i, all) {
         ul.appendChild(el('li', null, [el('a', { href: x.url, text: all.length === 1 ? 'Rota completa (' + stops.length + ' paradas)' : 'Trecho ' + (i + 1) + ': paradas ' + x.from + '–' + x.to })]));
       });
       r.appendChild(ul);
@@ -714,17 +726,31 @@
     r.appendChild(el('p', { class: 'pr-note', text: 'Gerado no aparelho pelo Field Planner. Posições inseridas pelo usuário (podem ser aproximadas); confira no jogo. O plano não substitui o jogo: toda ação acontece em campo.' }));
   }
 
+  var printing = false;
   function printPlan() {
     if (!plan || !plan.steps.length) { toast('Calcule um plano antes'); return; }
     if (typeof window.print !== 'function') { toast('Este navegador não permite imprimir/salvar PDF', 4000); return; }
+    if (printing) return;
+    printing = true;
     buildPrintReport();
     var title = document.title, d = new Date();
     // o nome do PDF sugerido pelo navegador vem do título da página
     document.title = 'plano-campos-' + d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-    var restore = function () { document.title = title; window.removeEventListener('afterprint', restore); };
+    document.body.classList.add('printing');
+    var restore = function () {
+      if (!printing) return;
+      printing = false;
+      document.title = title;
+      document.body.classList.remove('printing');
+      window.removeEventListener('afterprint', restore);
+      document.removeEventListener('pointerdown', restore, true);
+    };
+    // no Android window.print() não bloqueia e afterprint nem sempre chega: volta ao normal no afterprint
+    // ou no primeiro toque depois de fechar a janela de impressão (nunca por tempo, para não imprimir em branco)
     window.addEventListener('afterprint', restore);
+    setTimeout(function () { document.addEventListener('pointerdown', restore, true); }, 1500);
     toast('Na janela de impressão, escolha "Salvar como PDF"', 4000);
-    setTimeout(function () { window.print(); setTimeout(restore, 1000); }, 50);
+    setTimeout(function () { window.print(); }, 50);
   }
 
   /* ------------------------------------------------------------ */

@@ -4,7 +4,7 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 
 ## [1.7.0] — 2026-11-15
 ### Adicionado
-- **Rota no Google Maps** (aba Plano): links que abrem as paradas do plano, na ordem, no Google Maps (a pé, carro, bicicleta ou transporte), partindo da posição atual. Planos com mais de 10 paradas viram trechos encadeados, porque o Google Maps aceita até 9 paradas intermediárias por rota. O app não faz requisição: só monta o link (`geo.js`, `mapsRouteUrls`).
+- **Rota no Google Maps** (aba Plano): links que abrem as paradas do plano, na ordem, no Google Maps (a pé, carro ou bicicleta), partindo da posição atual. Planos com mais de 10 paradas viram trechos encadeados, porque o Google Maps aceita até 9 paradas intermediárias por rota. O app não faz requisição: só monta o link (`geo.js`, `mapsRouteUrls`).
 - **Exportar plano em PDF**: relatório pela janela de impressão do navegador ("Salvar como PDF") com resumo, croqui em SVG (rota, links numerados, campos e escala), links da rota, passos com coordenadas, chaves consumidas e lista de farm.
 - `tests/maps-route.test.js` (86 testes no total).
 

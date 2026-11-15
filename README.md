@@ -127,10 +127,11 @@ Na lista de portais, os botões `−`/`+` ajustam chaves rapidamente.
      - carro: 20 km/h, desvio 1,4, +3 min por parada para estacionar; trecho < 400 m vai a pé;
      - transporte: 15 km/h, desvio 1,4, +10 min de espera por trecho; trecho < 1 km vai a pé;
      - nos três: +1 min por link e +1 min por parada.
-   - **Rota no Google Maps:** abaixo de "Ver plano no mapa", escolha o modo (a pé, carro, bicicleta,
-     transporte) e toque no link para abrir as paradas na ordem do plano no Google Maps. A rota parte da sua
+   - **Rota no Google Maps:** abaixo de "Ver plano no mapa", escolha o modo (a pé, carro ou bicicleta;
+     transporte público não aceita paradas intermediárias no Google Maps) e toque no link para abrir as paradas na ordem do plano no Google Maps. A rota parte da sua
      posição atual. O Google Maps aceita até 10 paradas por rota, então planos maiores viram trechos
-     encadeados (cada um começa onde o anterior terminou) (`geo.js`, `mapsRouteUrls`). O app só monta o
+     encadeados (cada um começa onde o anterior terminou) (`geo.js`, `mapsRouteUrls`). Abra no app Google Maps:
+     no navegador do celular o Google pode aceitar só 3 paradas intermediárias. O app só monta o
      endereço; nada é enviado ao Google até você abrir o link.
    - **📄 Exportar plano em PDF:** abre a janela de impressão do navegador com um relatório: resumo, croqui
      do plano (rota, links numerados e campos, sem mapa de fundo), links da rota no Google Maps, passos com
