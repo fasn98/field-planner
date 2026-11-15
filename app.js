@@ -8,7 +8,9 @@
   'use strict';
 
   var STORE = 'fieldplanner.v1';
-  var VERSION = '1.7.0';
+  var VERSION = '1.7.1';
+  // nível padrão de portal novo ou importado sem nível: L1 só alcança 160 m e quase nunca fecha campo
+  var DEFAULT_LEVEL = 5;
   // Qualquer string de 1–64 caracteres sem controle. A segurança contra "constructor"/"__proto__"
   // vem dos mapas sem protótipo; filtrar mais trocaria ids e órfãos bloqueadores/links feitos.
   var ID_RE = /^[^\u0000-\u001f\u007f]{1,64}$/;
@@ -77,7 +79,7 @@
       id: typeof p.id === 'string' && ID_RE.test(p.id) ? p.id : newId(),
       nome: String(p.nome || p.name || 'Portal').trim().slice(0, 80) || 'Portal',
       lat: lat, lng: lng,
-      nivel: clampInt(p.nivel, 1, 8, 1),
+      nivel: clampInt(p.nivel, 1, 8, DEFAULT_LEVEL),
       chaves: clampInt(p.chaves, 0, 999, 0),
       observacao: String(p.observacao || '').slice(0, 300)
     };
@@ -807,7 +809,7 @@
     var ll = p || latlng || (prefill && prefill.coords) || null;
     f.lat.value = ll ? (+ll.lat).toFixed(6) : '';
     f.lng.value = ll ? (+ll.lng).toFixed(6) : '';
-    f.nivel.value = String(p ? p.nivel : 1);
+    f.nivel.value = String(p ? p.nivel : DEFAULT_LEVEL);
     f.chaves.value = String(p ? p.chaves : 0);
     f.observacao.value = p ? p.observacao : '';
     $('#portalDlg').returnValue = '';
@@ -1132,6 +1134,7 @@
   var bulkRows = [];
   var bulkForm = $('#bulkForm').elements;
   for (var bl = 1; bl <= 8; bl++) bulkForm.nivel.appendChild(el('option', { value: String(bl), text: 'L' + bl }));
+  bulkForm.nivel.value = String(DEFAULT_LEVEL);
 
   $('#bulkBtn').addEventListener('click', function () {
     bulkForm.text.value = '';
@@ -1250,7 +1253,7 @@
 
   $('#bulkDlg').addEventListener('close', function () {
     if ($('#bulkDlg').returnValue !== 'save') return;
-    var nivel = clampInt(bulkForm.nivel.value, 1, 8, 1), chaves = clampInt(bulkForm.chaves.value, 0, 999, 0);
+    var nivel = clampInt(bulkForm.nivel.value, 1, 8, DEFAULT_LEVEL), chaves = clampInt(bulkForm.chaves.value, 0, 999, 0);
     var added = [], n = nextPortalNumber();
     bulkRows.forEach(function (r) {
       if (r.erro || !r.use) return;

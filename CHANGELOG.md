@@ -2,6 +2,10 @@
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Datas no formato AAAA-MM-DD.
 
+## [1.7.1] — 2026-11-15
+### Alterado
+- **Nível padrão L5**: portal novo, importação em lote e arquivo importado sem nível entram como L5, não mais L1 (L1 alcança só 160 m e quase nunca fecha campo). Portais já cadastrados não mudam.
+
 ## [1.7.0] — 2026-11-15
 ### Adicionado
 - **Rota no Google Maps** (aba Plano): links que abrem as paradas do plano, na ordem, no Google Maps (a pé, carro ou bicicleta), partindo da posição atual. Planos com mais de 10 paradas viram trechos encadeados, porque o Google Maps aceita até 9 paradas intermediárias por rota. O app não faz requisição: só monta o link (`geo.js`, `mapsRouteUrls`).
