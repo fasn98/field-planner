@@ -262,6 +262,37 @@
     return { walk: Math.round(t.walk + action), car: Math.round(t.car + action), transit: Math.round(t.transit + action), action: action };
   }
 
+  /*
+   * Rota no Google Maps (link universal "maps/dir", abre no app do Google Maps ou no navegador).
+   * O Field Planner não faz requisição nenhuma: só monta o endereço que o usuário escolhe abrir.
+   * O Google Maps aceita até 9 paradas intermediárias por link; rotas maiores viram trechos
+   * encadeados (cada trecho começa onde o anterior terminou). O 1º trecho não tem origem:
+   * o Google Maps parte da posição atual do aparelho.
+   */
+  var MAPS_MAX_WAYPOINTS = 9;
+  var MAPS_MODES = { walk: 'walking', car: 'driving', transit: 'transit', bike: 'bicycling' };
+
+  function llStr(p) { return (+p.lat).toFixed(6) + ',' + (+p.lng).toFixed(6); }
+
+  /** points: [{lat,lng}] na ordem da rota → [{url, from, to}] (from/to = nº da parada, 1-based). */
+  function mapsRouteUrls(points, mode) {
+    var pts = (points || []).filter(function (p) { return p && isFinite(p.lat) && isFinite(p.lng); });
+    var travel = MAPS_MODES[mode] || MAPS_MODES.walk, out = [], i = 0;
+    while (i < pts.length) {
+      var origin = i > 0 ? pts[i - 1] : null;
+      var end = Math.min(pts.length, i + MAPS_MAX_WAYPOINTS + 1); // até 9 intermediárias + destino
+      var stops = pts.slice(i, end);
+      var url = 'https://www.google.com/maps/dir/?api=1' +
+        (origin ? '&origin=' + llStr(origin) : '') +
+        '&destination=' + llStr(stops[stops.length - 1]) +
+        (stops.length > 1 ? '&waypoints=' + stops.slice(0, -1).map(llStr).join('%7C') : '') +
+        '&travelmode=' + travel;
+      out.push({ url: url, from: i + 1, to: end });
+      i = end;
+    }
+    return out;
+  }
+
   return {
     R: R,
     TRAVEL: TRAVEL,
@@ -279,6 +310,8 @@
     linkRange: linkRange,
     linksCrossLL: linksCrossLL,
     portalUnderFieldLL: portalUnderFieldLL,
-    parseCoords: parseCoords
+    parseCoords: parseCoords,
+    mapsRouteUrls: mapsRouteUrls,
+    MAPS_MAX_WAYPOINTS: MAPS_MAX_WAYPOINTS
   };
 });

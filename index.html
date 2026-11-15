@@ -148,6 +148,28 @@
   .sim-banner { background: rgba(210,153,34,.15); border: 1px solid var(--warn); color: var(--text); border-radius: 12px; padding: 10px 12px; margin: 8px 0; font-size: 14px; }
   .farm-total { font-size: 15px; margin: 6px 0; }
   .fab { position: fixed; right: 12px; z-index: 1000; width: 52px; height: 52px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); font-size: 22px; }
+  .export-box { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; margin: 8px 0; display: grid; gap: 8px; }
+  .export-box .row { margin: 0; }
+  .export-box select { font-size: 16px; background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 6px; }
+  a.btn { color: var(--text); text-decoration: none; text-align: center; display: inline-flex; align-items: center; justify-content: center; }
+  #printReport { display: none; }
+  @media print {
+    @page { size: A4; margin: 12mm; }
+    html, body { height: auto; background: #fff !important; color: #111 !important; overflow: visible !important; }
+    body > *:not(#printReport) { display: none !important; }
+    #printReport { display: block; font: 11pt/1.35 system-ui, sans-serif; color: #111; }
+    #printReport h1 { font-size: 18pt; margin: 0 0 2mm; }
+    #printReport h2 { font-size: 13pt; margin: 6mm 0 2mm; break-after: avoid; }
+    #printReport .pr-meta, #printReport .pr-note, #printReport .pr-ll { color: #555; font-size: 9pt; }
+    #printReport .pr-warn { border: 1px solid #b45309; background: #fef3c7; padding: 2mm 3mm; border-radius: 2mm; }
+    #printReport table { width: 100%; border-collapse: collapse; }
+    #printReport th, #printReport td { border-bottom: 1px solid #ddd; padding: 1.2mm 1.5mm; text-align: left; vertical-align: top; }
+    #printReport .n { text-align: right; white-space: nowrap; }
+    #printReport tr { break-inside: avoid; }
+    #printReport .pr-stats th { color: #555; font-weight: normal; }
+    #printReport .sketch { width: 100%; height: auto; max-height: 120mm; }
+    #printReport a { color: #1d4ed8; word-break: break-all; }
+  }
 </style>
 </head>
 <body>
@@ -379,6 +401,8 @@
 </dialog>
 
 <div id="toast" role="status"></div>
+<!-- relatório para imprimir / salvar em PDF: só aparece na impressão -->
+<div id="printReport" aria-hidden="true"></div>
 <div id="moveBar" hidden>
   <div class="move-hint">Arraste o pino ou toque no lugar certo</div>
   <div id="moveInfo" class="move-info"></div>

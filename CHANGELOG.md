@@ -2,6 +2,12 @@
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Datas no formato AAAA-MM-DD.
 
+## [1.7.0] — 2026-11-15
+### Adicionado
+- **Rota no Google Maps** (aba Plano): links que abrem as paradas do plano, na ordem, no Google Maps (a pé, carro, bicicleta ou transporte), partindo da posição atual. Planos com mais de 10 paradas viram trechos encadeados, porque o Google Maps aceita até 9 paradas intermediárias por rota. O app não faz requisição: só monta o link (`geo.js`, `mapsRouteUrls`).
+- **Exportar plano em PDF**: relatório pela janela de impressão do navegador ("Salvar como PDF") com resumo, croqui em SVG (rota, links numerados, campos e escala), links da rota, passos com coordenadas, chaves consumidas e lista de farm.
+- `tests/maps-route.test.js` (86 testes no total).
+
 ## [1.6.2] — 2026-11-15
 ### Corrigido
 - Android: em "Importar lista de links → Abrir arquivo", arquivos .txt/.csv apareciam cinza e não podiam ser escolhidos (o seletor filtrava pelo tipo do arquivo, e arquivos recebidos por apps de conversa costumam vir com tipo genérico). O botão agora aceita qualquer arquivo; o conteúdo continua validado (máx. 5 MB, linhas sem coordenadas aparecem como erro na prévia).

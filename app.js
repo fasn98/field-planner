@@ -8,7 +8,7 @@
   'use strict';
 
   var STORE = 'fieldplanner.v1';
-  var VERSION = '1.6.2';
+  var VERSION = '1.7.0';
   // Qualquer string de 1–64 caracteres sem controle. A segurança contra "constructor"/"__proto__"
   // vem dos mapas sem protótipo; filtrar mais trocaria ids e órfãos bloqueadores/links feitos.
   var ID_RE = /^[^\u0000-\u001f\u007f]{1,64}$/;
@@ -460,6 +460,7 @@
       out.appendChild(el('p', { class: 'muted small', text: 'Tempo estimado: linha reta × desvio das ruas, mais ~1 min por link e por parada. ' +
         'Não é rota real: o app não consulta serviços de rotas.' }));
       out.appendChild(el('div', { class: 'row' }, [el('button', { class: 'btn grow', text: '🗺 Ver plano no mapa', onclick: showPlanOnMap })]));
+      renderRouteExport(out);
     }
     if (plan.simulation) {
       out.appendChild(el('div', { class: 'sim-banner', text: '🧪 Simulação: plano ideal pela posição dos portais, sem considerar suas chaves. ' +
@@ -532,6 +533,198 @@
       });
       out.appendChild(ul);
     }
+  }
+
+  /* ------------------------------------------------------------ */
+  /* Exportar: rota no Google Maps e relatório em PDF.             */
+  /* ------------------------------------------------------------ */
+
+  var mapsMode = 'walk';
+  var MAPS_MODE_NAMES = { walk: '🚶 a pé', car: '🚗 carro', bike: '🚲 bicicleta', transit: '🚌 transporte' };
+
+  /** Paradas do plano, na ordem, como {lat,lng,nome}. */
+  function planStops() {
+    return plan ? plan.steps.map(function (s) { return portalById(s.portal); }).filter(Boolean) : [];
+  }
+
+  function mapsLinkEls(links, total) {
+    return links.map(function (r, i) {
+      var label = links.length === 1 ? 'Abrir rota no Google Maps (' + total + ' paradas)'
+        : 'Trecho ' + (i + 1) + ': paradas ' + r.from + '–' + r.to;
+      return el('a', { class: 'btn grow', href: r.url, target: '_blank', rel: 'noopener noreferrer', text: '🧭 ' + label });
+    });
+  }
+
+  function renderRouteExport(out) {
+    var stops = planStops();
+    if (!stops.length) return;
+    var links = FPGeo.mapsRouteUrls(stops, mapsMode);
+    var sel = el('select', { 'aria-label': 'Modo da rota', onchange: function (e) { mapsMode = e.target.value; renderPlanPanel(); } });
+    Object.keys(MAPS_MODE_NAMES).forEach(function (k) {
+      var o = el('option', { value: k, text: MAPS_MODE_NAMES[k] });
+      if (k === mapsMode) o.selected = true;
+      sel.appendChild(o);
+    });
+    var box = el('div', { class: 'export-box' }, [
+      el('div', { class: 'row' }, [el('b', { class: 'grow', text: 'Rota no Google Maps' }), sel])
+    ]);
+    mapsLinkEls(links, stops.length).forEach(function (a) { box.appendChild(el('div', { class: 'row' }, [a])); });
+    box.appendChild(el('p', { class: 'muted small', text: (links.length > 1
+      ? 'O Google Maps aceita até ' + (FPGeo.MAPS_MAX_WAYPOINTS + 1) + ' paradas por rota: abra um trecho de cada vez (cada um começa onde o anterior terminou). '
+      : '') + 'A rota parte da sua posição atual. Abrir o link é com você: o app não envia nada ao Google.' }));
+    box.appendChild(el('div', { class: 'row' }, [el('button', { class: 'btn grow', text: '📄 Exportar plano em PDF', onclick: printPlan })]));
+    out.appendChild(box);
+  }
+
+  var SVGNS = 'http://www.w3.org/2000/svg';
+  function svgEl(tag, attrs, text) {
+    var e = document.createElementNS(SVGNS, tag);
+    Object.keys(attrs || {}).forEach(function (k) { e.setAttribute(k, attrs[k]); });
+    if (text != null) e.textContent = text;
+    return e;
+  }
+
+  /** Croqui do plano em SVG (sem mapa de fundo): campos, links numerados, rota e paradas. */
+  function planSketch() {
+    var ids = Object.create(null);
+    plan.links.forEach(function (l) { ids[l.from] = ids[l.to] = true; });
+    plan.steps.forEach(function (s) { ids[s.portal] = true; });
+    var pts = Object.keys(ids).map(portalById).filter(Boolean);
+    if (plan.origin) pts.push(plan.origin);
+    if (!pts.length) return null;
+    var pr = FPGeo.makeProjection(FPGeo.centroid(pts));
+    var xy = pts.map(pr.toXY);
+    var minX = Math.min.apply(null, xy.map(function (q) { return q.x; })), maxX = Math.max.apply(null, xy.map(function (q) { return q.x; }));
+    var minY = Math.min.apply(null, xy.map(function (q) { return q.y; })), maxY = Math.max.apply(null, xy.map(function (q) { return q.y; }));
+    var W = 700, H = 460, pad = 30;
+    var k = Math.min((W - 2 * pad) / Math.max(maxX - minX, 1), (H - 2 * pad) / Math.max(maxY - minY, 1));
+    var ox = (W - (maxX - minX) * k) / 2, oy = (H - (maxY - minY) * k) / 2;
+    var P = function (p) { var q = pr.toXY(p); return { x: ox + (q.x - minX) * k, y: H - (oy + (q.y - minY) * k) }; }; // norte para cima
+    var svg = svgEl('svg', { viewBox: '0 0 ' + W + ' ' + H, class: 'sketch', role: 'img', 'aria-label': 'Croqui do plano' });
+    svg.appendChild(svgEl('rect', { x: 0, y: 0, width: W, height: H, fill: '#ffffff', stroke: '#999' }));
+    plan.fields.forEach(function (f) {
+      var q = f.portals.map(portalById);
+      if (q.some(function (p) { return !p; })) return;
+      svg.appendChild(svgEl('polygon', { points: q.map(P).map(function (c) { return c.x.toFixed(1) + ',' + c.y.toFixed(1); }).join(' '),
+        fill: '#2dd4bf', 'fill-opacity': '0.18', stroke: '#0f766e', 'stroke-width': '0.8' }));
+    });
+    var route = [];
+    if (plan.origin) route.push(P(plan.origin));
+    plan.steps.forEach(function (s) { var p = portalById(s.portal); if (p) route.push(P(p)); });
+    if (route.length > 1) svg.appendChild(svgEl('polyline', { points: route.map(function (c) { return c.x.toFixed(1) + ',' + c.y.toFixed(1); }).join(' '),
+      fill: 'none', stroke: '#d97706', 'stroke-width': '1.5', 'stroke-dasharray': '6 4' }));
+    plan.links.forEach(function (l) {
+      var a = portalById(l.from), b = portalById(l.to);
+      if (!a || !b) return;
+      var A = P(a), B = P(b);
+      svg.appendChild(svgEl('line', { x1: A.x, y1: A.y, x2: B.x, y2: B.y, stroke: '#0f766e', 'stroke-width': '1.6' }));
+      var mx = A.x + (B.x - A.x) * 0.4, my = A.y + (B.y - A.y) * 0.4;
+      svg.appendChild(svgEl('text', { x: mx, y: my + 3, 'font-size': '9', 'text-anchor': 'middle', fill: '#0f766e', stroke: '#fff', 'stroke-width': '2.5', 'paint-order': 'stroke' }, String(l.n)));
+    });
+    pts.forEach(function (p) {
+      if (p === plan.origin) return;
+      var c = P(p);
+      svg.appendChild(svgEl('circle', { cx: c.x, cy: c.y, r: 4, fill: '#f59e0b', stroke: '#78350f', 'stroke-width': '1' }));
+    });
+    if (plan.origin) {
+      var o = P(plan.origin);
+      svg.appendChild(svgEl('circle', { cx: o.x, cy: o.y, r: 7, fill: '#2563eb' }));
+      svg.appendChild(svgEl('text', { x: o.x, y: o.y + 3.5, 'font-size': '9', 'text-anchor': 'middle', fill: '#fff', 'font-weight': 'bold' }, 'A'));
+    }
+    plan.steps.forEach(function (s, i) {
+      var p = portalById(s.portal);
+      if (!p) return;
+      var c = P(p);
+      svg.appendChild(svgEl('text', { x: c.x + 6, y: c.y - 6, 'font-size': '11', 'font-weight': 'bold', fill: '#b45309', stroke: '#fff', 'stroke-width': '3', 'paint-order': 'stroke' }, String(i + 1)));
+    });
+    // escala: barra de 100/200/500 m… que caiba em ~1/4 da largura
+    var opts = [50, 100, 200, 500, 1000, 2000, 5000], len = opts[0];
+    opts.forEach(function (m) { if (m * k <= W / 4) len = m; });
+    svg.appendChild(svgEl('line', { x1: 14, y1: H - 14, x2: 14 + len * k, y2: H - 14, stroke: '#111', 'stroke-width': '2' }));
+    svg.appendChild(svgEl('text', { x: 14, y: H - 20, 'font-size': '10', fill: '#111' }, fmtDist(len)));
+    svg.appendChild(svgEl('text', { x: W - 14, y: 20, 'font-size': '12', 'text-anchor': 'end', fill: '#111' }, 'N ↑'));
+    return svg;
+  }
+
+  function buildPrintReport() {
+    var r = $('#printReport');
+    r.textContent = '';
+    var now = new Date();
+    r.appendChild(el('h1', { text: 'Plano de campos' }));
+    r.appendChild(el('p', { class: 'pr-meta', text: 'Field Planner v' + VERSION + ' · ' + now.toLocaleString('pt-BR') +
+      (plan.origin ? ' · partida A: ' + plan.origin.lat.toFixed(5) + ', ' + plan.origin.lng.toFixed(5) : '') }));
+    if (plan.simulation) r.appendChild(el('p', { class: 'pr-warn', text: 'Simulação: plano ideal pela posição dos portais, sem considerar suas chaves. Use a lista de farm para buscar as chaves antes de executar.' }));
+    var tt = FPGeo.travelTimes(plan.steps.map(function (s) { return s.walk; }), plan.links.length);
+    r.appendChild(el('table', { class: 'pr-stats' }, [el('tbody', null, [
+      el('tr', null, [el('th', { text: 'Campos' }), el('td', { text: String(plan.fields.length) }), el('th', { text: 'Links' }), el('td', { text: String(plan.links.length) }),
+        el('th', { text: 'AP' }), el('td', { text: fmtNum(plan.ap) })]),
+      el('tr', null, [el('th', { text: 'Distância' }), el('td', { text: fmtDist(plan.distance) }), el('th', { text: 'Área' }), el('td', { text: fmtArea(plan.area) }),
+        el('th', { text: 'Estratégia' }), el('td', { text: STRAT_NAMES[plan.strategy] || '–' })]),
+      el('tr', null, [el('th', { text: 'A pé' }), el('td', { text: fmtMin(tt.walk) }), el('th', { text: 'Carro' }), el('td', { text: fmtMin(tt.car) }),
+        el('th', { text: 'Transporte' }), el('td', { text: fmtMin(tt.transit) })])
+    ])]));
+    var sk = planSketch();
+    if (sk) {
+      r.appendChild(el('h2', { text: 'Croqui' }));
+      r.appendChild(sk);
+      r.appendChild(el('p', { class: 'pr-note', text: 'Laranja: rota a pé (A = partida, números = paradas). Verde: links (número = ordem) e campos. Sem mapa de fundo; escala aproximada.' }));
+    }
+    var stops = planStops();
+    if (stops.length) {
+      r.appendChild(el('h2', { text: 'Rota no Google Maps (' + MAPS_MODE_NAMES[mapsMode].replace(/^\S+\s/, '') + ')' }));
+      var ul = el('ul', { class: 'pr-links' });
+      FPGeo.mapsRouteUrls(stops, mapsMode).forEach(function (x, i, all) {
+        ul.appendChild(el('li', null, [el('a', { href: x.url, text: all.length === 1 ? 'Rota completa (' + stops.length + ' paradas)' : 'Trecho ' + (i + 1) + ': paradas ' + x.from + '–' + x.to })]));
+      });
+      r.appendChild(ul);
+    }
+    r.appendChild(el('h2', { text: 'Passos' }));
+    var tb = el('tbody');
+    plan.steps.forEach(function (s, i) {
+      var p = portalById(s.portal);
+      tb.appendChild(el('tr', null, [
+        el('td', { class: 'n', text: String(i + 1) }),
+        el('td', null, [el('b', { text: pname(s.portal) }), p ? el('div', { class: 'pr-ll', text: p.lat.toFixed(6) + ', ' + p.lng.toFixed(6) + ' · L' + p.nivel }) : null]),
+        el('td', { class: 'n', text: fmtDist(s.walk) }),
+        el('td', { text: s.links.map(function (l) {
+          return '#' + l.n + ' → ' + pname(l.to) + (l.fields ? ' (+' + l.fields + ' campo' + (l.fields > 1 ? 's' : '') + ')' : '');
+        }).join('; ') })
+      ]));
+    });
+    r.appendChild(el('table', { class: 'pr-table' }, [el('thead', null, [el('tr', null, [
+      el('th', { class: 'n', text: '#' }), el('th', { text: 'Ir até' }), el('th', { class: 'n', text: 'Andar' }), el('th', { text: 'Links' })])]), tb]));
+    if (plan.keysUsed.length) {
+      r.appendChild(el('h2', { text: 'Chaves consumidas' }));
+      var kb = el('tbody');
+      plan.keysUsed.forEach(function (k) {
+        kb.appendChild(el('tr', null, [el('td', { text: pname(k.portal) }), el('td', { class: 'n', text: String(k.used) }), el('td', { class: 'n', text: String(k.have) })]));
+      });
+      r.appendChild(el('table', { class: 'pr-table' }, [el('thead', null, [el('tr', null, [el('th', { text: 'Portal' }), el('th', { class: 'n', text: 'Usar' }), el('th', { class: 'n', text: 'Tem' })])]), kb]));
+    }
+    if (plan.keysMissing.length) {
+      var total = plan.keysMissing.reduce(function (a, k) { return a + k.missing; }, 0);
+      r.appendChild(el('h2', { text: plan.simulation ? 'Lista de farm' : 'Chaves faltantes' }));
+      r.appendChild(el('p', { text: 'Faltam ' + total + ' chave(s) em ' + plan.keysMissing.length + ' portal(is).' }));
+      var fb = el('tbody');
+      plan.keysMissing.forEach(function (k) {
+        fb.appendChild(el('tr', null, [el('td', { text: '☐ ' + pname(k.portal) }), el('td', { class: 'n', text: String(k.missing) }), el('td', { class: 'n', text: k.have + ' / ' + k.need })]));
+      });
+      r.appendChild(el('table', { class: 'pr-table' }, [el('thead', null, [el('tr', null, [el('th', { text: 'Portal' }), el('th', { class: 'n', text: 'Faltam' }), el('th', { class: 'n', text: 'Tem / precisa' })])]), fb]));
+    }
+    r.appendChild(el('p', { class: 'pr-note', text: 'Gerado no aparelho pelo Field Planner. Posições inseridas pelo usuário (podem ser aproximadas); confira no jogo. O plano não substitui o jogo: toda ação acontece em campo.' }));
+  }
+
+  function printPlan() {
+    if (!plan || !plan.steps.length) { toast('Calcule um plano antes'); return; }
+    if (typeof window.print !== 'function') { toast('Este navegador não permite imprimir/salvar PDF', 4000); return; }
+    buildPrintReport();
+    var title = document.title, d = new Date();
+    // o nome do PDF sugerido pelo navegador vem do título da página
+    document.title = 'plano-campos-' + d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    var restore = function () { document.title = title; window.removeEventListener('afterprint', restore); };
+    window.addEventListener('afterprint', restore);
+    toast('Na janela de impressão, escolha "Salvar como PDF"', 4000);
+    setTimeout(function () { window.print(); setTimeout(restore, 1000); }, 50);
   }
 
   /* ------------------------------------------------------------ */

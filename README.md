@@ -127,6 +127,14 @@ Na lista de portais, os botões `−`/`+` ajustam chaves rapidamente.
      - carro: 20 km/h, desvio 1,4, +3 min por parada para estacionar; trecho < 400 m vai a pé;
      - transporte: 15 km/h, desvio 1,4, +10 min de espera por trecho; trecho < 1 km vai a pé;
      - nos três: +1 min por link e +1 min por parada.
+   - **Rota no Google Maps:** abaixo de "Ver plano no mapa", escolha o modo (a pé, carro, bicicleta,
+     transporte) e toque no link para abrir as paradas na ordem do plano no Google Maps. A rota parte da sua
+     posição atual. O Google Maps aceita até 10 paradas por rota, então planos maiores viram trechos
+     encadeados (cada um começa onde o anterior terminou) (`geo.js`, `mapsRouteUrls`). O app só monta o
+     endereço; nada é enviado ao Google até você abrir o link.
+   - **📄 Exportar plano em PDF:** abre a janela de impressão do navegador com um relatório: resumo, croqui
+     do plano (rota, links numerados e campos, sem mapa de fundo), links da rota no Google Maps, passos com
+     coordenadas, chaves consumidas e lista de farm. Escolha **Salvar como PDF**. Tudo é gerado no aparelho.
 2. **Modo em campo**: o passo atual em destaque, distância e rumo até o portal, e dois botões grandes:
    - **✓ Concluído** — registra o link como feito, desconta 1 chave do destino, recalcula.
    - **✕ Falhou** — pergunta o motivo: *bloqueado por outro link* (você cadastra o bloqueador),
@@ -236,6 +244,7 @@ npm test     # node --test, sem dependências
 | `tests/simulation.test.js` | simulação sem chaves e lista de farm, área do campo, objetivo MU, corte de candidatos por distância |
 | `tests/multilayer.test.js` | multicamada: uma camada por portal central encaixado, ordem do miolo para fora, sobreposição, base A–B, objetivo MU |
 | `tests/travel.test.js` | tempo estimado a pé, de carro e de transporte: trechos curtos a pé, trecho longo, sem trechos |
+| `tests/maps-route.test.js` | links do Google Maps: sem origem no 1º trecho, trechos de até 9 intermediárias + destino encadeados, modo de viagem, pontos inválidos |
 | `tests/optimizer.test.js` | fanfield, links não se cruzam, bloqueador, chaves, limite de saída, alcance por nível, raio, pares falhos, 2-opt |
 | `tests/parse-and-compliance.test.js` | extração de coordenadas; ausência de domínios da Niantic no código; CSP; `VERSION` igual em `app.js`, `sw.js` e `package.json` |
 | `tests/bulk-import.test.js` | importação em lote: leitura de linhas (link, coordenadas, nome), prioridade `!3d`/`pll=` em `parseCoords`, links curtos recusados |
