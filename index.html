@@ -349,7 +349,8 @@
     <textarea name="text" rows="6" placeholder="https://www.google.com/maps/…  (um link por linha)"></textarea>
     <div class="row">
       <button type="button" id="bulkFileBtn" class="btn sm grow">Abrir arquivo (.txt, .csv, .json)</button>
-      <input id="bulkFile" type="file" accept=".txt,.csv,.json,text/plain,text/csv,application/json" hidden>
+      <!-- sem filtro "accept": no Android arquivos .txt/.csv salvos com tipo genérico ficavam cinza; o conteúdo é validado na leitura -->
+      <input id="bulkFile" type="file" hidden>
       <button type="button" id="bulkParseBtn" class="btn sm primary grow">Ler linhas</button>
     </div>
     <div class="grid2">

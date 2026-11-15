@@ -8,7 +8,7 @@
   'use strict';
 
   var STORE = 'fieldplanner.v1';
-  var VERSION = '1.6.1';
+  var VERSION = '1.6.2';
   // Qualquer string de 1–64 caracteres sem controle. A segurança contra "constructor"/"__proto__"
   // vem dos mapas sem protótipo; filtrar mais trocaria ids e órfãos bloqueadores/links feitos.
   var ID_RE = /^[^\u0000-\u001f\u007f]{1,64}$/;

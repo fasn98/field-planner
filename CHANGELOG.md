@@ -2,6 +2,10 @@
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Datas no formato AAAA-MM-DD.
 
+## [1.6.2] — 2026-11-15
+### Corrigido
+- Android: em "Importar lista de links → Abrir arquivo", arquivos .txt/.csv apareciam cinza e não podiam ser escolhidos (o seletor filtrava pelo tipo do arquivo, e arquivos recebidos por apps de conversa costumam vir com tipo genérico). O botão agora aceita qualquer arquivo; o conteúdo continua validado (máx. 5 MB, linhas sem coordenadas aparecem como erro na prévia).
+
 ## [1.6.1] — 2026-11-14
 ### Corrigido
 - Celular: a barra "Salvar posição" do modo mover podia ficar fora da tela quando a página estava ampliada (zoom do navegador ao tocar nos campos). Campos agora usam fonte de 16 px, a página não amplia (`maximum-scale=1`; o mapa continua com zoom normal) e o modo mover desfaz a ampliação ao começar.
