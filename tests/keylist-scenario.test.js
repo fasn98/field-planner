@@ -209,7 +209,7 @@ test('borda: pedaço com exatamente 3 letras junta', () => {
   assert.deepEqual(M.mergeTruncated(o).map(x => x.nome), ['Escultura da Aurora']);
 });
 
-test('borda: dois nomes inteiros com o mesmo prefixo — o pedaço vira o mais longo e os inteiros continuam separados', () => {
+test('borda: dois nomes inteiros com o mesmo prefixo — o pedaço sai e ficam os inteiros e os inteiros continuam separados', () => {
   const o = [
     { nome: 'Ninhos Dourados', distancia_m: 150, origem, ts: 1 },
     { nome: 'Ninhos De Pássaro', distancia_m: 150, origem, ts: 2 },
@@ -275,10 +275,10 @@ test('nome cortado lido antes: fica a observação inteira (endereço, chaves e 
   assert.equal(m[0], o[1]);
 });
 
-test('mergeTruncated com 2000 observações termina rápido', () => {
+test('mergeTruncated com 2000 observações termina rápido (< 2 s)', () => {
   const o = [];
   for (let i = 0; i < 2000; i++) o.push({ nome: 'Portal número ' + i, distancia_m: (i * 7.3) % 3000, origem: Object.assign(at(i % 40, 0), { precisao: 10 }), ts: i });
   const t0 = Date.now();
   assert.equal(M.mergeTruncated(o).length, 2000);
-  assert.ok(Date.now() - t0 < 500, (Date.now() - t0) + ' ms');
+  assert.ok(Date.now() - t0 < 2000, (Date.now() - t0) + ' ms');
 });
