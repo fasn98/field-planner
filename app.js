@@ -959,10 +959,19 @@
         nivel: f.nivel.value, chaves: f.chaves.value, observacao: f.observacao.value
       });
       if (!data) { toast('Coordenadas inválidas'); return; }
-      if (editing) { pushUndo(); Object.assign(editing, data); } else db.portals.push(data);
-      save();
-      invalidatePlan();
-      toast(editing ? 'Portal atualizado' : 'Portal adicionado');
+      if (editing) {
+        pushUndo(); Object.assign(editing, data);
+        save(); invalidatePlan(); toast('Portal atualizado');
+      } else {
+        // portal novo a menos de 30 m de outro: pode ser o mesmo (ex.: cadastrado pelo link de um print) → pergunta
+        var near = null, nd = Infinity;
+        db.portals.forEach(function (p) { var d = FPGeo.haversine(p, data); if (d < nd) { nd = d; near = p; } });
+        var add = function () { db.portals.push(data); save(); invalidatePlan(); toast('Portal adicionado'); };
+        if (near && nd < 30) {
+          confirmDialog('Portal perto', 'Já existe “' + near.nome + '” a ' + fmtDist(nd) + ' daqui. Se for o mesmo portal, renomeie aquele ' +
+            'em vez de cadastrar outro. Cadastrar mesmo assim?').then(function (ok) { if (ok) add(); });
+        } else add();
+      }
     } else if (v === 'move' && editing) {
       startMove(editing);
     } else if (v === 'delete' && editing) {
@@ -1992,6 +2001,18 @@
       var others = (pd.otherStreet || []).map(portalById).filter(Boolean).map(function (p) { return p.nome; });
       if (others.length) li.appendChild(el('div', { class: 'muted small', text: 'No anel, só portais de outras ruas: ' + others.slice(0, 4).join(' · ') }));
       li.appendChild(el('div', { class: 'row' }, [el('button', { class: 'btn sm', text: '📎 Cadastrar pelo link', onclick: function () { openPasteDlg(pd.nome); } })]));
+      // o sufixo de rua do provisório é só a rua mais próxima (portal de esquina): o jogador ainda pode escolher
+      var alt = el('div', { class: 'row' });
+      (pd.otherStreet || []).slice(0, 4).forEach(function (id) {
+        var p = portalById(id);
+        if (!p) return;
+        alt.appendChild(el('button', { class: 'btn sm ghost', text: 'É este mesmo assim: ' + p.nome + (origin ? ' · ' + fmtDist(FPGeo.haversine(origin, p)) : ''),
+          onclick: function () {
+            confirmDialog('Rua diferente', 'O print diz “' + (pd.notRegistered.street || 'outra rua') + '”, mas “' + p.nome + '” está cadastrado em outra rua. ' +
+              'Renomear para “' + pd.nome + '” mesmo assim?').then(function (ok) { if (ok) acceptName(id, pd.nome, null, {}); });
+          } }));
+      });
+      if (alt.childNodes.length) li.appendChild(alt);
       return li;
     }
     // empate: o jogador decide qual é (o app nunca escolhe sozinho)

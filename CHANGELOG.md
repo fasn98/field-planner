@@ -6,7 +6,9 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 ### Alterado
 - **Nomear por print, lista de chaves: a rua do print filtra os candidatos.** Se nenhum portal do anel fica na rua do endereço lido (a comparação normaliza "Av."/"Avenida", acentos e preposições) e todos os candidatos dizem a sua rua, o pendente mostra "provavelmente não cadastrado". Nesse caso não aparecem os botões "É este" para portais de outra rua; aparece **📎 Cadastrar pelo link**, que abre "Colar link" com o nome do print já preenchido.
   - Caso real: "Estatua Loro Mania" (Av. Santo Amaro, 852,7 m) listava CB 026 (R. Nova York) e BW 078 (R. Ipurinás).
-  - Candidato sem rua no nome, como "Portal 07", não é descartado pela rua.
+  - Candidato sem rua no nome, como "Portal 07", não é descartado pela rua. Endereço que não começa por uma rua ("Shopping …, Av. …") também não descarta ninguém. Na observação, a rua só conta num campo explícito ("Rua: …").
+  - O sufixo de rua do provisório é só a rua mais próxima e pode não bater (portal de esquina). Por isso continua havendo **É este mesmo assim**, com uma confirmação que avisa que a rua não bate.
+- **Cadastrar portal novo a menos de 30 m de outro pede confirmação.** Isso evita duplicata ao cadastrar pelo link um portal que já existia com nome provisório.
 - `tests/keylist-scenario.test.js` com 3 casos novos; `tests/real-16112026.test.js` com a Loro Mania (só local).
 
 ## [1.10.0] — 2026-11-16

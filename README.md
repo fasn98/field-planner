@@ -162,7 +162,10 @@ jogo, com confirmação um a um. Fica em **Ajustes → Nomear por print** e vem 
    - Dois nomes nunca ficam com o mesmo portal: a atribuição é global.
    - **Rua do print:** se nenhum candidato do anel fica na rua do endereço lido, e todos dizem a sua rua no nome
      ("BK 070 - R. Arizona") ou na observação, o nome aparece como **provavelmente não cadastrado**, sem "É este".
-     O botão **📎 Cadastrar pelo link** abre "Colar link" com o nome já preenchido.
+     O botão **📎 Cadastrar pelo link** abre "Colar link" com o nome já preenchido. Se você sabe que é um dos
+     portais do anel (o sufixo de rua do provisório é só a rua mais próxima), use **É este mesmo assim**.
+     Endereço que não começa por rua ("Shopping …") não descarta candidatos. Cadastrar um portal a menos de
+     30 m de outro pede confirmação.
    - **Pendentes:** nomes com mais de um candidato. Você toca em **É este** no certo (o app nunca escolhe num
      empate), ou tira outro print a uns 100 m dali.
 3. **Print de mapa:**

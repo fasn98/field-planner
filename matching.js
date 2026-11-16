@@ -32,7 +32,7 @@
       .replace(/[^a-z0-9]+/g, ' ').trim();
   }
 
-  var STREET_PREFIX = /^(rua|r|avenida|av|alameda|al|travessa|tv|trav|praca|pca|pc|estrada|estr|rodovia|rod|largo|lgo|viela|via|marginal|parque|pq)\s+/;
+  var STREET_PREFIX = /^(rua|r|avenida|av|alameda|al|travessa|tv|trav|praca|pca|pc|estrada|estr|rodovia|rod|largo|lgo|viela|via|viaduto|marginal|parque|pq)\s+/;
   var STREET_STOP = { de: 1, da: 1, do: 1, das: 1, dos: 1, e: 1, dr: 1, doutor: 1, prof: 1, professor: 1, padre: 1, pe: 1, jorn: 1, jornalista: 1, eng: 1, sao: 1, santa: 1, santo: 1, gen: 1, cel: 1 };
 
   /** Palavras significativas do nome da rua: "R. Dr. José de Souza, 120 - Brooklin" → ["jose","souza"]. */
@@ -54,10 +54,17 @@
 
   var STREET_IN_TEXT = /(^|[\s,(])(rua|r|avenida|av|alameda|al|travessa|tv|trav|pra[cç]a|p[cç]a|estrada|estr|rodovia|rod|largo|lgo|viela|viaduto|marginal)\.?\s+\S/i;
 
-  /** O portal do app diz em que rua está (sufixo do nome "… - R. X" ou a observação)? Sem isso, a rua não decide nada. */
+  /**
+   * O portal do app diz em que rua está? Sufixo do nome ("… - R. X") ou, na observação, um campo explícito
+   * ("Rua: …" / "Endereço: …"); texto livre como "perto da rua de trás" não conta. Sem isso, a rua não decide nada.
+   */
   function portalStreetKnown(p) {
     var parts = String(p.nome || '').split(/\s+[-–]\s*|\s*[-–]\s+/);
-    return (parts.length > 1 && STREET_IN_TEXT.test(' ' + parts.slice(1).join(' '))) || STREET_IN_TEXT.test(' ' + (p.observacao || ''));
+    return (parts.length > 1 && STREET_IN_TEXT.test(' ' + parts.slice(1).join(' '))) || /\b(rua|endere[cç]o)\s*:\s*\S/i.test(p.observacao || '');
+  }
+  /** O endereço do print começa por uma rua ("R. …", "Av. …", "Alameda …")? "Shopping Morumbi, …" não. */
+  function addressHasStreet(addr) {
+    return STREET_IN_TEXT.test(' ' + String(addr || '').split(/[,\-–]/)[0].trim());
   }
 
   /** Nome provisório (gerado por importação): "BK 070 - …", "CB 12", "BW 5", "GJ 3", "ENS 05", "Portal 07", "Enseada 03 - …". */
@@ -526,7 +533,7 @@
       if (addr && cands.length) {
         var comp = cands.filter(function (p) { return streetCompatible(addr, p) === true; });
         if (comp.length) { cands = comp; streetHit = true; }
-        else if (streetTokens(addr).length && cands.every(portalStreetKnown)) {
+        else if (addressHasStreet(addr) && streetTokens(addr).length && cands.every(portalStreetKnown)) {
           // nenhum candidato do anel fica na rua do print (e todos dizem a sua rua): o portal certo
           // provavelmente não está cadastrado; não oferecer "É este" para portais de outra rua
           notRegistered = { street: String(addr).split(/[,\-–]/)[0].trim(), others: cands.map(function (p) { return p.id; }) };
@@ -649,6 +656,6 @@
     portalUncertainty: portalUncertainty, sameNamePortal: sameNamePortal, SAME_NAME: SAME_NAME,
     streetTokens: streetTokens, streetCompatible: streetCompatible, isProvisional: isProvisional,
     hungarian: hungarian, fitSimilarity: fitSimilarity, matchMap: matchMap, ringTol: ringTol, trilaterate: trilaterate,
-    matchKeyList: matchKeyList, trustedTri: trustedTri, isDuplicateObs: isDuplicateObs, portalStreetKnown: portalStreetKnown, matchSingle: matchSingle, distinctOrigins: distinctOrigins, localFrame: localFrame
+    matchKeyList: matchKeyList, trustedTri: trustedTri, isDuplicateObs: isDuplicateObs, portalStreetKnown: portalStreetKnown, addressHasStreet: addressHasStreet, matchSingle: matchSingle, distinctOrigins: distinctOrigins, localFrame: localFrame
   };
 });

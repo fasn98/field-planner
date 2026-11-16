@@ -55,7 +55,8 @@ const leituras = [
     L('Coruja Tropical', 'Av. Épsilon, 2893', 1100, 1, 1),
     L('Girafa Azul', 'R. Kapa, 124', 1800, 1, 1),
     L('Leão de Pedra', 'Av. Lambda, 77 - Centro', 420, 5, 1),
-    L('Coruja Branca', 'Av. Lambda, 900', 640, 4, 1)] }
+    L('Coruja Branca', 'Av. Lambda, 900', 640, 4, 1),
+    L('Fonte do Shopping', 'Shopping Ômega, Av. Lambda, 10', 420, 4, 1)] }
 ];
 
 const obs = [];
@@ -73,7 +74,7 @@ const key = M.normName;
 
 test('cenário: linha repetida entre prints conta uma vez só', () => {
   assert.equal(obs.filter(o => key(o.nome) === key('Metas no céu')).length, 1);
-  assert.equal(obs.length, 11);
+  assert.equal(obs.length, 12);
 });
 
 test('cenário: portais já nomeados ficam "já cadastrado" (acento, artigo, erro de digitação, sufixo de rua, ≥ 1 km)', () => {
@@ -128,6 +129,16 @@ test('cenário: nenhum candidato do anel na rua do print → "provavelmente não
   assert.ok(!r.suggestions.some(s => s.key === key('Leão de Pedra')));
 });
 
+test('cenário: endereço que não começa por rua ("Shopping …") não descarta candidatos', () => {
+  const pd = r.pending.find(p => p.key === key('Fonte do Shopping'));
+  assert.ok(pd && !pd.notRegistered, JSON.stringify(pd));
+  assert.ok(pd.candidates.includes(id('BK 005 - R. Mi')));
+  assert.equal(M.addressHasStreet('Shopping Morumbi, Av. Roque Petroni Jr'), false);
+  assert.equal(M.addressHasStreet('Brooklin, São Paulo'), false);
+  assert.equal(M.addressHasStreet('Avenida Santo Amaro, 3214 - Br..'), true);
+  assert.equal(M.addressHasStreet('R. Nova York, 245'), true);
+});
+
 test('cenário: candidato sem rua no nome não é descartado pela rua do print', () => {
   const k = key('Coruja Branca');
   const pd = r.pending.find(p => p.key === k), s = r.suggestions.find(x => x.key === k);
@@ -137,6 +148,8 @@ test('cenário: candidato sem rua no nome não é descartado pela rua do print',
   assert.equal(M.portalStreetKnown({ nome: 'Portal 07' }), false);
   assert.equal(M.portalStreetKnown({ nome: 'CB 026 - R. Nova York' }), true);
   assert.equal(M.portalStreetKnown({ nome: 'Metas em Mente- Viaduto Santo Amaro' }), true);
+  assert.equal(M.portalStreetKnown({ nome: 'Portal 07', observacao: 'perto da rua de trás' }), false);
+  assert.equal(M.portalStreetKnown({ nome: 'Portal 07', observacao: 'Rua: Alameda dos Anapurus' }), true);
 });
 
 test('cenário: dois portais diferentes com nome parecido na mesma lista não viram um grupo só', () => {
