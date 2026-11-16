@@ -2,6 +2,14 @@
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Datas no formato AAAA-MM-DD.
 
+## [1.10.2] — 2026-11-16
+### Alterado
+- **Nomear por print, lista de chaves: menos ruído nos pendentes** (teste em campo de 16/11, 13 pendentes, a maioria sem decisão possível).
+  - O pedido à IA manda pular portal com nome cortado pela tela, em vez de copiar o pedaço visível ("Quadra de Squash do", "Ninhos D").
+  - Um pedaço que ainda vier é trocado pelo nome inteiro quando a mesma linha aparece inteira em outro print do mesmo ponto (origem a < 5 m), com a mesma distância, abaixo de 1 km. Acima de 1 km a distância é arredondada pelo jogo e não junta.
+  - Chaves de portais a mais de 5 km ("Praça …" a 438 km, "Pizzaiolo …" a 29 km) saem dos pendentes para um grupo recolhido, **Longe daqui**. Portal longe já cadastrado continua em "Já cadastrados".
+- 5 testes novos (`tests/keylist-scenario.test.js`, `tests/printread.test.js`).
+
 ## [1.10.1] — 2026-11-16
 ### Alterado
 - **Nomear por print, lista de chaves: a rua do print filtra os candidatos.** Se nenhum portal do anel fica na rua do endereço lido (a comparação normaliza "Av."/"Avenida", acentos e preposições) e todos os candidatos dizem a sua rua, o pendente mostra "provavelmente não cadastrado". Nesse caso não aparecem os botões "É este" para portais de outra rua; aparece **📎 Cadastrar pelo link**, que abre "Colar link" com o nome do print já preenchido.

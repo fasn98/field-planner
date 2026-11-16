@@ -168,6 +168,11 @@ jogo, com confirmação um a um. Fica em **Ajustes → Nomear por print** e vem 
      30 m de outro pede confirmação.
    - **Pendentes:** nomes com mais de um candidato. Você toca em **É este** no certo (o app nunca escolhe num
      empate), ou tira outro print a uns 100 m dali.
+   - **Nome cortado:** a IA pula portal com nome cortado pela tela. Se mesmo assim um pedaço vier ("Ninhos D") e
+     a linha inteira aparecer em outro print tirado do mesmo ponto, com a mesma distância (abaixo de 1 km), o
+     pedaço vira o nome inteiro.
+   - **Longe daqui:** chaves de portais a mais de 5 km, sem portal com esse nome no app, ficam num grupo
+     recolhido no fim, sem pedir decisão. Portal longe que já está cadastrado continua em "Já cadastrados".
 3. **Print de mapa:**
    - A IA marca a posição de cada nome na imagem.
    - O app acha escala e deslocamento entre o print e os portais cadastrados (rotação só se o mapa estiver

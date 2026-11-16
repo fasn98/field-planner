@@ -132,3 +132,8 @@ test('preferências: recurso desligado por padrão, modelo padrão claude-sonnet
   st.setItem(R.PREFS_STORE, JSON.stringify({ enabled: 'sim', model: 'x y<script>', autoPct: 5 }));
   assert.deepEqual(R.loadPrefs(st), { enabled: false, model: 'claude-sonnet-5-5', autoPct: 80 }); // lote nunca abaixo de 80%
 });
+
+test('pedido manda pular portal com nome cortado (não transcrever pedaço de nome)', () => {
+  assert.match(R.SYSTEM, /cortado.*pule esse portal/);
+  assert.doesNotMatch(R.SYSTEM, /copie só a parte visível/);
+});

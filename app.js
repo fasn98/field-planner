@@ -8,7 +8,7 @@
   'use strict';
 
   var STORE = 'fieldplanner.v1';
-  var VERSION = '1.10.1';
+  var VERSION = '1.10.2';
   // nível padrão de portal novo ou importado sem nível: L1 só alcança 160 m e quase nunca fecha campo
   var DEFAULT_LEVEL = 5;
   // Qualquer string de 1–64 caracteres sem controle. A segurança contra "constructor"/"__proto__"
@@ -1792,13 +1792,14 @@
     }
   }
 
-  var keySugs = [], keyPending = [], keyRegistered = [];
+  var keySugs = [], keyPending = [], keyRegistered = [], keyFar = [];
   function refreshSuggestions() {
     var r = FPMatch.matchKeyList(observations, db.portals);
     keySugs = r.suggestions.filter(function (s) { return !nm.skipped[s.key + '\u0000' + s.portal]; })
       .map(function (s) { return Object.assign({ src: 'lista', dist: null }, s); });
     keyPending = r.pending;
     keyRegistered = r.registered;
+    keyFar = r.far || [];
     // mapa: descarta sugestões cujo portal já foi renomeado ou excluído
     nm.mapSugs = nm.mapSugs.filter(function (s) { var p = portalById(s.portal); return p && FPMatch.isProvisional(p.nome); });
     nm.mapSugs.forEach(function (s) { var t = FPMatch.sameNamePortal(s.nome, db.portals, s.portal); s.nameTakenBy = t ? t.id : null; });
@@ -2136,6 +2137,15 @@
       var lastOrigin = observations.length ? observations[observations.length - 1].origem : null;
       keyPending.forEach(function (pd) { pl.appendChild(pendingRow(pd, lastOrigin)); });
       box.appendChild(pl);
+    }
+    // chaves de portais a mais de 5 km (outras cidades): recolhidas, não pedem decisão
+    if (keyFar.length) {
+      var fl = el('ul', { class: 'list' });
+      keyFar.forEach(function (f) {
+        fl.appendChild(el('li', null, [el('span', { text: f.nome }), el('span', { class: 'muted small', text: ' · ' + (Math.round(f.distancia_m / 100) / 10).toLocaleString('pt-BR') + ' km' })]));
+      });
+      box.appendChild(el('details', { class: 'nm-far' }, [
+        el('summary', { class: 'small muted', text: 'Longe daqui, mais de 5 km (' + keyFar.length + '): chaves de outras cidades, nada a fazer' }), fl]));
     }
     box.appendChild(el('div', { class: 'row' }, [
       el('button', { class: 'btn sm', text: '↶ Desfazer', onclick: undoLast }),

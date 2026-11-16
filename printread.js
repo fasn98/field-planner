@@ -46,7 +46,7 @@
   var SYSTEM = [
     'Você lê screenshots do jogo Ingress tirados pelo próprio usuário e transcreve dados de PORTAIS (lugares), em JSON.',
     'Regras:',
-    '- Transcreva só o que está visível na imagem. Não invente nem complete nomes; se um nome estiver cortado, copie só a parte visível.',
+    '- Transcreva só o que está visível na imagem. Não invente nem complete nomes. Se o nome de um portal estiver cortado (pela borda da tela, por reticências ou por estar parcialmente coberto), pule esse portal inteiro: não o coloque no JSON.',
     '- IGNORE nomes de agentes, donos de portal, mensagens do COMM e qualquer dado de jogadores. Nunca os coloque no JSON.',
     '- tipo "mapa": mapa/intel com vários portais. Para cada portal com nome visível, dê x e y em pixels da imagem (origem no canto superior esquerdo). escala_m_por_px só se houver barra de escala legível; norte_para_cima = false só se o mapa estiver claramente girado.',
     '- tipo "lista_chaves": lista do inventário de chaves. Para cada linha: nome, endereco (se aparecer), distancia_m (converta km para metros; "1,2 km" = 1200), nivel e chaves (quantidade) se aparecerem. x e y = null.',

@@ -156,3 +156,44 @@ test('cenário: dois portais diferentes com nome parecido na mesma lista não vi
   const g = M.matchKeyList([{ nome: 'Mural 1', distancia_m: 120, origem, ts: 1 }, { nome: 'Mural 2', distancia_m: 300, origem, ts: 1 }], portals);
   assert.deepEqual([...g.pending, ...g.suggestions, ...g.registered].map(x => x.key).sort(), ['mural 1', 'mural 2']);
 });
+
+test('nome cortado: a mesma linha lida inteira no mesmo ponto vira o nome inteiro', () => {
+  const full = d('Escultura Aurora - R. Alfa', 8);
+  const o = [
+    { nome: 'Escultura da Aurora', endereco: 'R. Alfa, 10', distancia_m: full, origem, ts: 1 },
+    { nome: 'Escultura d', endereco: null, distancia_m: full, origem, ts: 2 },
+    // mesmo prefixo, distância diferente: outro portal, não junta
+    { nome: 'Escultura', distancia_m: 300, origem, ts: 3 }
+  ];
+  const m = M.mergeTruncated(o);
+  assert.deepEqual(m.map(x => x.nome), ['Escultura da Aurora', 'Escultura']);
+  const g = M.matchKeyList(o, portals);
+  assert.ok(g.registered.some(x => x.portal === id('Escultura Aurora - R. Alfa')));
+  assert.ok(![...g.pending, ...g.suggestions].some(x => x.key === key('Escultura d')));
+});
+
+test('nome cortado acima de 1 km (distância arredondada) não junta: podem ser portais diferentes', () => {
+  const o = [{ nome: 'Mural', distancia_m: 1100, origem, ts: 1 }, { nome: 'Mural Natural', distancia_m: 1100, origem, ts: 1 }];
+  assert.equal(M.mergeTruncated(o).length, 2);
+});
+
+test('nome cortado de outro ponto (origem a mais de 5 m) não junta', () => {
+  const o = [{ nome: 'Escultura d', distancia_m: 200, origem, ts: 1 },
+    { nome: 'Escultura da Aurora', distancia_m: 200, origem: Object.assign(at(50, 0), { precisao: 10 }), ts: 2 }];
+  assert.equal(M.mergeTruncated(o).length, 2);
+});
+
+test('chaves a mais de 5 km ficam fora dos pendentes, no grupo "longe"; já cadastrado longe continua reconhecido', () => {
+  const longe = Object.assign({ id: 'longe1', nome: 'Pier do Mar - Av. Litoral', nivel: 1, chaves: 0, observacao: 'confirmado' }, at(0, 80000));
+  const o = [
+    { nome: 'Praça Distante', distancia_m: 438000, origem, ts: 1 },
+    { nome: 'Pizzaria Longe', distancia_m: 29300, origem, ts: 1 },
+    { nome: 'Pier do Mar', distancia_m: Math.round(G.haversine(origem, longe)), origem, ts: 1 },
+    { nome: 'Grafite Sol Nascente', distancia_m: 575.2, origem, ts: 1 }
+  ];
+  const g = M.matchKeyList(o, portals.concat([longe]));
+  assert.deepEqual(g.far.map(f => f.nome), ['Pizzaria Longe', 'Praça Distante']);
+  assert.ok(!g.pending.some(p => /Distante|Longe/.test(p.nome)));
+  assert.ok(g.registered.some(r => r.portal === 'longe1'));
+  assert.ok(g.pending.some(p => p.key === key('Grafite Sol Nascente')) || g.suggestions.some(s => s.key === key('Grafite Sol Nascente')));
+});

@@ -14,6 +14,7 @@
   var MIN_INLIERS = 3;         // abaixo disso, o print de mapa não casa nada
   var NEAR_RING_M = 12;        // lista de chaves: ±(12 m + precisão do GPS + incerteza do portal)
   var FAR_RING_M = 60;         // ≥ 1 km (o jogo arredonda): mais 60 m, e nunca decide sozinho
+  var FAR_AWAY_M = 5000;       // chave de portal a mais de 5 km: outra cidade, fica fora dos pendentes
   var PORTAL_UNC_EST_M = 20;   // portal com posição estimada ou nunca confirmada
   var PORTAL_UNC_OK_M = 5;     // portal confirmado
   var SAME_NAME = 0.85;        // similaridade mínima para "é o mesmo portal" 
@@ -424,6 +425,29 @@
       Math.abs((a.distancia_m || 0) - (b.distancia_m || 0)) < 0.05 && G.haversine(a.origem, b.origem) < 5;
   }
 
+  /**
+   * Nome cortado pela tela: a mesma linha lida inteira em outro print (mesma origem a < 5 m e mesma distância
+   * abaixo de 1 km) vira esse nome inteiro ("Ninhos D" → "Ninhos De Pássaro"). Acima de 1 km a distância é
+   * arredondada pelo jogo e dois portais diferentes podem empatar: não junta. Duplicatas resultantes saem.
+   */
+  function mergeTruncated(list) {
+    var src = (list || []).filter(function (o) { return o && o.nome && o.distancia_m >= 0 && o.origem; });
+    var out = [];
+    src.forEach(function (o) {
+      var k = normName(o.nome), full = null;
+      if (k.length >= 3 && o.distancia_m < 1000) {
+        src.forEach(function (b) {
+          var kb = normName(b.nome);
+          if (kb.length > k.length && kb.indexOf(k) === 0 && Math.abs(b.distancia_m - o.distancia_m) < 0.05 &&
+              G.haversine(b.origem, o.origem) < 5 && (!full || kb.length > normName(full).length)) full = b.nome;
+        });
+      }
+      var m = full ? Object.assign({}, o, { nome: full }) : o;
+      if (!out.some(function (x) { return isDuplicateObs(x, m); })) out.push(m);
+    });
+    return out;
+  }
+
   /** Quantas origens distintas (≥ 30 m entre si) uma lista de observações tem. */
   function distinctOrigins(obs) {
     var seen = [];
@@ -485,12 +509,13 @@
   /**
    * Casamento incremental da lista de chaves.
    * observations: todas as observações guardadas; portals: portais do app.
-   * Devolve { suggestions: [...], pending: [...], named: [...] }.
+   * Devolve { suggestions: [...], pending: [...], registered: [...], far: [...] }.
    *   suggestion: { key, nome, portal, confidence, obs: n, origins: n, keys, nivel, estimate?: {lat,lng,residual,shift} }
    *   pending:    { key, nome, candidates: [ids], obs, origins, hint }
+   *   far:        { key, nome, distancia_m } (todas as observações a mais de 5 km e o nome sem portal no app)
    */
   function matchKeyList(observations, portals) {
-    var groups = groupObs(observations), keys = Object.keys(groups);
+    var groups = groupObs(mergeTruncated(observations)), keys = Object.keys(groups);
     var inRing = function (o, p, mult) {
       var rt = ringTol(o.distancia_m, o.origem.precisao, portalUncertainty(p));
       return { ok: Math.abs(G.haversine(o.origem, p) - o.distancia_m) <= rt.tol * (mult || 1), weak: rt.weak };
@@ -514,6 +539,15 @@
       registered.push(reg);
     });
     var named = registered; // compatibilidade
+    // chaves de portais de outras cidades (todas as distâncias > 5 km): fora dos pendentes, num grupo à parte
+    var far = [];
+    rest = rest.filter(function (k) {
+      var obs = groups[k];
+      if (!obs.every(function (o) { return o.distancia_m > FAR_AWAY_M; })) return true;
+      far.push({ key: k, nome: obs[obs.length - 1].nome, distancia_m: Math.min.apply(null, obs.map(function (o) { return o.distancia_m; })) });
+      return false;
+    });
+    far.sort(function (a, b) { return a.distancia_m - b.distancia_m; });
     // 2) renomear: só portais provisórios que nenhuma observação já reconheceu pelo nome
     var work = [];
     rest.forEach(function (k) {
@@ -621,7 +655,7 @@
             : 'tire outro print a uns 100 m daqui para separar ' + w.cands.length + ' candidatos' });
       }
     });
-    return { suggestions: suggestions.sort(byConf), pending: pending, registered: registered, named: named };
+    return { suggestions: suggestions.sort(byConf), pending: pending, registered: registered, named: named, far: far };
   }
 
   /** Posição trilaterada confiável: resíduo e erro esperado pela geometria até 15 m. */
@@ -656,6 +690,6 @@
     portalUncertainty: portalUncertainty, sameNamePortal: sameNamePortal, SAME_NAME: SAME_NAME,
     streetTokens: streetTokens, streetCompatible: streetCompatible, isProvisional: isProvisional,
     hungarian: hungarian, fitSimilarity: fitSimilarity, matchMap: matchMap, ringTol: ringTol, trilaterate: trilaterate,
-    matchKeyList: matchKeyList, trustedTri: trustedTri, isDuplicateObs: isDuplicateObs, portalStreetKnown: portalStreetKnown, addressHasStreet: addressHasStreet, matchSingle: matchSingle, distinctOrigins: distinctOrigins, localFrame: localFrame
+    matchKeyList: matchKeyList, trustedTri: trustedTri, isDuplicateObs: isDuplicateObs, mergeTruncated: mergeTruncated, FAR_AWAY_M: FAR_AWAY_M, portalStreetKnown: portalStreetKnown, addressHasStreet: addressHasStreet, matchSingle: matchSingle, distinctOrigins: distinctOrigins, localFrame: localFrame
   };
 });
