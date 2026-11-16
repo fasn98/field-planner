@@ -969,7 +969,14 @@
         var add = function () { db.portals.push(data); save(); invalidatePlan(); toast('Portal adicionado'); };
         if (near && nd < 30) {
           confirmDialog('Portal perto', 'Já existe “' + near.nome + '” a ' + fmtDist(nd) + ' daqui. Se for o mesmo portal, renomeie aquele ' +
-            'em vez de cadastrar outro. Cadastrar mesmo assim?').then(function (ok) { if (ok) add(); });
+            'em vez de cadastrar outro. Cadastrar mesmo assim?').then(function (ok) {
+            if (ok) { add(); return; }
+            // não cadastrou: reabre o formulário com o que foi digitado, para não perder nada
+            openPortalDlg(null, null, { coords: { lat: data.lat, lng: data.lng }, nome: data.nome });
+            var g = $('#portalForm').elements;
+            g.nivel.value = String(data.nivel); g.chaves.value = String(data.chaves); g.observacao.value = data.observacao;
+            toast('Cadastro não feito: confira o portal próximo ou salve de novo');
+          });
         } else add();
       }
     } else if (v === 'move' && editing) {
