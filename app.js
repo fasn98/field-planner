@@ -375,7 +375,10 @@
     if (!validationMemo) validationMemo = FPPlan.validate(db.plan, liveData());
     return validationMemo;
   }
+  // geração do plano em uso: o desfazer só devolve passos ao mesmo plano em que foram tirados
+  var planGen = 0;
   function setPlanRecord(rec) {
+    planGen++;
     db.plan = rec;
     plan = rec ? rec.result : null;
     lastOptPos = plan ? plan.origin : null;
@@ -407,12 +410,15 @@
     else if (pin && !pendingPin) toast('📌 Plano de simulação fixado: não muda sozinho', 4000);
   };
 
-  var pendingReason = '', pendingOrigin = null, pendingPin = false, pendingSettings = null;
+  var pendingReason = '', pendingOrigin = null, pendingPin = false, pendingSettings = null, pendingManual = false;
+  /** Dados mudaram com um cálculo a caminho: refaz o pedido com os dados novos (a resposta antiga é descartada). */
+  function restartPending() { if (busy) optimize(pendingReason, pendingManual); }
   function optimize(reason, manual) {
     if (!worker) { toast('Seu navegador não suporta Web Workers'); return; }
     if (db.portals.length < 2) { toast('Cadastre pelo menos 2 portais'); return; }
     var s = db.settings;
     pendingPin = !!manual && isPinned();
+    pendingManual = !!manual;
     pendingSettings = Object.assign({}, s);
     lastOptPos = pos ? { lat: pos.lat, lng: pos.lng } : null;
     pendingOrigin = lastOptPos;
@@ -434,7 +440,7 @@
 
   /** Recálculo automático (GPS, tempo, dados, simulação, modo em campo): nunca num plano fixado. */
   function autoOptimize(reason) {
-    if (!FPPlan.autoRecalcReason(db.plan, { type: 'auto', reason: reason })) return false;
+    if (!FPPlan.autoRecalcReason(db.plan, { type: 'auto', reason: reason })) { restartPending(); return false; }
     optimize(reason);
     return true;
   }
@@ -508,6 +514,7 @@
     if (!plan || !db.plan) return;
     db.plan.pinned = !db.plan.pinned;
     if (db.plan.pinned) cancelPending(); // um recálculo a caminho não substitui o plano que acabou de ser fixado
+    else pendingPin = false;             // soltou durante o Recalcular: o resultado chega solto
     save();
     renderPlanPanel();
     toast(db.plan.pinned ? '📌 Plano fixado: só muda pelo Recalcular' : 'Plano solto: volta a recalcular sozinho em campo');
@@ -906,6 +913,7 @@
     renderPortalList();
     renderPlanPanel(); // "tem", farm e faltantes vêm das chaves de agora
     renderField();
+    restartPending(); // cálculo a caminho foi pedido com as chaves de antes
   }
 
   var levelSel = $('#portalForm').elements.nivel;
@@ -1429,6 +1437,7 @@
     confirmDialog('Apagar tudo', 'Remove todos os portais, bloqueadores e configurações deste aparelho. Exporte antes se quiser guardar.').then(function (ok) {
       if (!ok) return;
       endMove(false);
+      cancelPending(); // resposta a caminho não pode recriar um plano com portais apagados
       db = emptyDb(); plan = null; undoStack = [];
       save();
       setFieldMode(false);
@@ -1502,8 +1511,9 @@
   function snapshot() {
     return JSON.stringify({ done: db.done, excluded: db.excluded, blockers: db.blockers, coveredManual: db.coveredManual,
       keys: db.portals.map(function (p) { return [p.id, p.chaves]; }),
-      // plano fixado não é recalculado: o desfazer devolve também os passos que tinham saído dele
-      plan: isPinned() ? { steps: plan.steps, links: plan.links } : null });
+      // plano fixado não é recalculado: o desfazer devolve também os passos que tinham saído dele,
+      // mas só ao mesmo plano (gen); outro plano fixado depois disso não recebe passos de um antigo
+      plan: plan ? { gen: planGen, steps: plan.steps, links: plan.links } : null });
   }
   function pushUndo() { undoStack.push(snapshot()); if (undoStack.length > 30) undoStack.shift(); }
 
@@ -1589,7 +1599,8 @@
     var snap = JSON.parse(s);
     db.done = snap.done; db.excluded = snap.excluded; db.blockers = snap.blockers; db.coveredManual = snap.coveredManual;
     snap.keys.forEach(function (kv) { var p = portalById(kv[0]); if (p) p.chaves = kv[1]; });
-    if (snap.plan && isPinned()) { plan.steps = snap.plan.steps; plan.links = snap.plan.links; }
+    if (snap.plan && isPinned() && snap.plan.gen === planGen) { plan.steps = snap.plan.steps; plan.links = snap.plan.links; }
+    else if (isPinned()) toast('Desfeito nos dados; o plano fixado é outro e não foi alterado', 4000);
     save();
     autoOptimize('desfeito');
     renderAll();

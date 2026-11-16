@@ -80,9 +80,9 @@
     if (bad || links.length > MAX_LINKS) return null;
     var fields = (Array.isArray(r.fields) ? r.fields : []).filter(function (f) {
       return f && Array.isArray(f.portals) && f.portals.length === 3 && f.portals.every(isId);
-    }).map(function (f) { return { link: Math.round(num(f.link, 0)), portals: f.portals.slice(), area: Math.max(0, Math.round(num(f.area, 0))) }; });
+    }).slice(0, 2 * MAX_LINKS).map(function (f) { return { link: Math.round(num(f.link, 0)), portals: f.portals.slice(), area: Math.max(0, Math.round(num(f.area, 0))) }; });
     var keyRows = function (list, withMissing) {
-      return (Array.isArray(list) ? list : []).filter(function (k) { return k && isId(k.portal); }).map(function (k) {
+      return (Array.isArray(list) ? list : []).filter(function (k) { return k && isId(k.portal); }).slice(0, MAX_LINKS).map(function (k) {
         var o = { portal: k.portal, need: Math.max(0, Math.round(num(k.need, 0))), have: Math.max(0, Math.round(num(k.have, 0))) };
         if (withMissing) o.missing = Math.max(0, Math.round(num(k.missing, 0)));
         else { o.used = Math.max(0, Math.round(num(k.used, 0))); delete o.need; }
@@ -97,7 +97,7 @@
       layers: Math.max(0, Math.round(num(r.layers, 0))),
       candidates: Math.max(0, Math.round(num(r.candidates, 0))),
       inRadius: Math.max(0, Math.round(num(r.inRadius, 0))),
-      candidateIds: (Array.isArray(r.candidateIds) ? r.candidateIds : []).filter(isId),
+      candidateIds: (Array.isArray(r.candidateIds) ? r.candidateIds : []).filter(isId).slice(0, MAX_LINKS),
       steps: steps, links: links, fields: fields,
       distance: Math.max(0, Math.round(num(r.distance, 0))),
       ap: Math.max(0, Math.round(num(r.ap, 0))),
@@ -111,7 +111,7 @@
       origin: ll(r.origin) || ll(raw.origin)
     };
     var positions = Object.create(null);
-    if (raw.positions && typeof raw.positions === 'object') Object.keys(raw.positions).forEach(function (id) {
+    if (raw.positions && typeof raw.positions === 'object') Object.keys(raw.positions).slice(0, 2 * MAX_LINKS).forEach(function (id) {
       var v = raw.positions[id];
       if (isId(id) && Array.isArray(v) && ll({ lat: v[0], lng: v[1] })) positions[id] = [+v[0], +v[1]];
     });
@@ -127,7 +127,7 @@
         objective: typeof s.objective === 'string' ? s.objective.slice(0, 20) : null,
         strategy: typeof s.strategy === 'string' ? s.strategy.slice(0, 20) : null, simulate: !!s.simulate
       },
-      candidates: (Array.isArray(raw.candidates) ? raw.candidates : []).filter(isId),
+      candidates: (Array.isArray(raw.candidates) ? raw.candidates : []).filter(isId).slice(0, MAX_LINKS),
       positions: positions,
       result: result
     };
