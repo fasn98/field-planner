@@ -415,7 +415,7 @@
   function restartPending() { if (busy) optimize(pendingReason, pendingManual); }
   function optimize(reason, manual) {
     if (!worker) { toast('Seu navegador não suporta Web Workers'); return; }
-    if (db.portals.length < 2) { toast('Cadastre pelo menos 2 portais'); return; }
+    if (db.portals.length < 2) { if (busy) cancelPending(); toast('Cadastre pelo menos 2 portais'); return; } // resposta a caminho viria de dados apagados
     var s = db.settings;
     pendingPin = !!manual && isPinned();
     pendingManual = !!manual;
