@@ -3,19 +3,18 @@
  * Rede: apenas tiles do OpenStreetMap (via Leaflet) e os próprios arquivos do app.
  * Nenhum dado sai do aparelho. GPS é somente leitura (navigator.geolocation).
  */
-/* global L, FPGeo */
+/* global L, FPGeo, FPPlan */
 (function () {
   'use strict';
 
   var STORE = 'fieldplanner.v1';
-  var VERSION = '1.7.1';
+  var VERSION = '1.8.0';
   // nível padrão de portal novo ou importado sem nível: L1 só alcança 160 m e quase nunca fecha campo
   var DEFAULT_LEVEL = 5;
   // Qualquer string de 1–64 caracteres sem controle. A segurança contra "constructor"/"__proto__"
   // vem dos mapas sem protótipo; filtrar mais trocaria ids e órfãos bloqueadores/links feitos.
   var ID_RE = /^[^\u0000-\u001f\u007f]{1,64}$/;
-  var MOVE_RECALC_M = 100;
-  var PERIODIC_RECALC_MS = 5 * 60 * 1000;
+  var MOVE_RECALC_M = FPPlan.MOVE_RECALC_M; // recálculo automático só em plano solto (FPPlan.autoRecalcReason)
   var LEVEL_COLORS = ['#fece5a', '#ffa630', '#ff7315', '#e40000', '#fd2992', '#eb26cd', '#c124e0', '#9627f4'];
 
   var $ = function (s) { return document.querySelector(s); };
@@ -26,7 +25,7 @@
 
   function emptyDb() {
     return {
-      version: 1, portals: [], blockers: [], done: [], excluded: [], coveredManual: [], lastImport: null,
+      version: 1, portals: [], blockers: [], done: [], excluded: [], coveredManual: [], lastImport: null, plan: null,
       settings: { radius: 1500, maxOut: 8, objective: 'campos', strategy: 'auto', simulate: false }
     };
   }
@@ -47,6 +46,7 @@
       d.lastImport = li && Array.isArray(li.ids) ? { ts: Number(li.ts) || 0, label: String(li.label || '').slice(0, 40),
         ids: li.ids.filter(function (x) { return typeof x === 'string' && ids[x]; }) } : null;
       if (d.lastImport && !d.lastImport.ids.length) d.lastImport = null;
+      d.plan = FPPlan.sanitizeRecord(d.plan); // plano salvo: restaurado como está, sem recalcular
       return d;
     } catch (e) {
       console.warn('[FP] falha ao ler dados locais', e);
@@ -54,6 +54,7 @@
     }
   }
   function save() {
+    validationMemo = null;
     try { localStorage.setItem(STORE, JSON.stringify(db)); }
     catch (e) { toastError('Não foi possível salvar (armazenamento cheio?)'); }
   }
@@ -331,9 +332,10 @@
       setGpsChip('GPS ±' + Math.round(p.coords.accuracy) + ' m', p.coords.accuracy <= 30 ? 'ok' : 'warn');
       renderMe();
       if (!centeredOnce && !db.portals.length) { map.setView([pos.lat, pos.lng], 16); centeredOnce = true; }
-      if (fieldMode && plan && !busy) {
-        if (!lastOptPos) optimize('GPS disponível');
-        else if (FPGeo.haversine(lastOptPos, pos) > MOVE_RECALC_M) optimize('você se moveu mais de ' + MOVE_RECALC_M + ' m');
+      if (plan && !busy) {
+        var why = FPPlan.autoRecalcReason(db.plan, { type: 'gps', fieldMode: fieldMode, lastPos: lastOptPos,
+          moved: lastOptPos ? FPGeo.haversine(lastOptPos, pos) : 0 });
+        if (why) optimize(why);
       }
       renderField();
     }, function (err) {
@@ -352,43 +354,72 @@
   /* Otimizador (Web Worker).                                      */
   /* ------------------------------------------------------------ */
 
-  var plan = null, lastOptAt = 0, reqSeq = 0, busy = false;
+  // plano em uso = db.plan.result (salvo no localStorage com as entradas do cálculo; ver plan.js)
+  var plan = db.plan ? db.plan.result : null, lastOptAt = db.plan ? db.plan.ts : 0, reqSeq = 0, busy = false;
+  if (plan) lastOptPos = plan.origin;
+  var validationMemo = null;
+  function isPinned() { return !!(plan && db.plan && db.plan.pinned); }
+  function updateOptBtn() {
+    var b = $('#optBtn');
+    b.disabled = busy;
+    b.textContent = busy ? 'Calculando…' : isPinned() ? '⟳ Recalcular' : 'Calcular plano';
+  }
+  /** Ignora respostas do otimizador ainda a caminho (o plano atual passou a valer). */
+  function cancelPending() { reqSeq++; busy = false; updateOptBtn(); }
+  function liveData() {
+    return { portals: db.portals, blockers: db.blockers, done: db.done, excluded: db.excluded, coveredManual: db.coveredManual, maxOut: db.settings.maxOut };
+  }
+  /** Validação do plano salvo contra os dados atuais (memorizada até o próximo save()). */
+  function planValidation() {
+    if (!plan || !db.plan) return null;
+    if (!validationMemo) validationMemo = FPPlan.validate(db.plan, liveData());
+    return validationMemo;
+  }
+  function setPlanRecord(rec) {
+    db.plan = rec;
+    plan = rec ? rec.result : null;
+    lastOptPos = plan ? plan.origin : null;
+    lastOptAt = rec ? rec.ts : 0;
+    save();
+  }
   var worker = null;
   try { worker = new Worker('worker.js'); } catch (e) { console.error('[FP] worker indisponível', e); }
 
   if (worker) worker.onerror = function (e) {
     busy = false;
-    $('#optBtn').disabled = false;
-    $('#optBtn').textContent = 'Calcular plano';
+    updateOptBtn();
     toastError('Falha ao carregar o otimizador' + (e && e.message ? ': ' + e.message : ''));
   };
   if (worker) worker.onmessage = function (e) {
     var m = e.data;
     if (m.reqId !== reqSeq) return; // resposta antiga
     busy = false;
-    $('#optBtn').disabled = false;
-    $('#optBtn').textContent = 'Calcular plano';
-    if (m.type === 'error') { toastError('Erro no otimizador: ' + m.error); return; }
-    plan = m.result;
-    plan.reason = pendingReason;
-    plan.origin = pendingOrigin; // posição usada neste cálculo (ponto A da rota)
+    if (m.type === 'error') { updateOptBtn(); toastError('Erro no otimizador: ' + m.error); return; }
+    var res = m.result;
+    res.reason = pendingReason;
+    res.origin = pendingOrigin; // posição usada neste cálculo (ponto A da rota)
+    // padrão: plano de simulação é fixado ao ser salvo; recálculo pedido de um plano fixado continua fixado
+    var pin = !!res.links.length && (res.simulation || pendingPin);
+    setPlanRecord(FPPlan.makeRecord(res, { origin: pendingOrigin, settings: pendingSettings, appVersion: VERSION, pinned: pin, portals: db.portals, ts: lastOptAt }));
     renderAll();
     if (pendingReason && fieldMode) toast('Plano recalculado: ' + pendingReason);
     else if (!plan.links.length) toast('Nenhum link possível com os dados atuais', 4000);
+    else if (pin && !pendingPin) toast('📌 Plano de simulação fixado: não muda sozinho', 4000);
   };
 
-  var pendingReason = '', pendingOrigin = null;
-  function optimize(reason) {
+  var pendingReason = '', pendingOrigin = null, pendingPin = false, pendingSettings = null;
+  function optimize(reason, manual) {
     if (!worker) { toast('Seu navegador não suporta Web Workers'); return; }
     if (db.portals.length < 2) { toast('Cadastre pelo menos 2 portais'); return; }
     var s = db.settings;
+    pendingPin = !!manual && isPinned();
+    pendingSettings = Object.assign({}, s);
     lastOptPos = pos ? { lat: pos.lat, lng: pos.lng } : null;
     pendingOrigin = lastOptPos;
     lastOptAt = Date.now();
     pendingReason = reason || '';
     busy = true;
-    $('#optBtn').disabled = true;
-    $('#optBtn').textContent = 'Calculando…';
+    updateOptBtn();
     worker.postMessage({
       type: 'optimize', reqId: ++reqSeq,
       input: {
@@ -401,9 +432,24 @@
     if (!pos) toast('Sem GPS: considerando todos os portais, a partir do centro deles', 3500);
   }
 
+  /** Recálculo automático (GPS, tempo, dados, simulação, modo em campo): nunca num plano fixado. */
+  function autoOptimize(reason) {
+    if (!FPPlan.autoRecalcReason(db.plan, { type: 'auto', reason: reason })) return false;
+    optimize(reason);
+    return true;
+  }
+  /** Recálculo pedido pelo usuário: num plano fixado, só com confirmação. */
+  function manualOptimize(reason) {
+    if (!isPinned()) { optimize(reason); return; }
+    confirmDialog('Recalcular plano', 'Isso substitui o plano fixado. Continuar?').then(function (ok) {
+      if (ok) optimize(reason, true);
+    });
+  }
+
   // Recálculo periódico (a cada 5 min) quando há plano em uso.
   setInterval(function () {
-    if (plan && fieldMode && !busy && Date.now() - lastOptAt >= PERIODIC_RECALC_MS) optimize('5 minutos desde o último cálculo');
+    var why = plan && !busy && FPPlan.autoRecalcReason(db.plan, { type: 'timer', fieldMode: fieldMode, elapsedMs: Date.now() - lastOptAt });
+    if (why) optimize(why);
   }, 30 * 1000);
 
   /* ------------------------------------------------------------ */
@@ -427,20 +473,59 @@
       cfg.radius.value = db.settings.radius;
       cfg.maxOut.value = db.settings.maxOut;
       save();
-      if (simChanged && plan) optimize(db.settings.simulate ? 'simulação ligada' : 'simulação desligada');
+      if (!simChanged || !plan) return;
+      if (autoOptimize(db.settings.simulate ? 'simulação ligada' : 'simulação desligada')) return;
+      // plano fixado: desligar a simulação reaproveita o mesmo plano, revalidado com as chaves reais
+      if (!db.settings.simulate && plan.simulation) leaveSimulation();
+      else renderPlanPanel();
     });
   });
 
-  $('#optBtn').addEventListener('click', function () { optimize(''); });
-  $('#startBtn').addEventListener('click', function () { setFieldMode(true); });
+  /** Simulação → campo sem recalcular: mesma ordem e mesmos links, conferidos com as chaves de agora. */
+  function leaveSimulation() {
+    var v = FPPlan.toFieldPlan(db.plan, liveData());
+    if (!v.ok) {
+      var first = v.issues[0];
+      toastError('O plano fixado continua como simulação: ' + (first.step ? 'passo ' + first.step + ', link #' + first.n + ': ' : '') + first.text +
+        (v.issues.length > 1 ? ' (e mais ' + (v.issues.length - 1) + ')' : ''));
+      renderPlanPanel();
+      return false;
+    }
+    db.settings.simulate = false;
+    cfg.simulate.checked = false;
+    save();
+    renderAll();
+    toast('Plano fixado pronto para o modo em campo: mesma ordem e mesmos links', 4000);
+    return true;
+  }
+
+  $('#optBtn').addEventListener('click', function () { manualOptimize(''); });
+  $('#startBtn').addEventListener('click', function () {
+    if (plan && plan.simulation && !leaveSimulation()) return;
+    setFieldMode(true);
+  });
+  $('#pinBtn').addEventListener('click', function () {
+    if (!plan || !db.plan) return;
+    db.plan.pinned = !db.plan.pinned;
+    if (db.plan.pinned) cancelPending(); // um recálculo a caminho não substitui o plano que acabou de ser fixado
+    save();
+    renderPlanPanel();
+    toast(db.plan.pinned ? '📌 Plano fixado: só muda pelo Recalcular' : 'Plano solto: volta a recalcular sozinho em campo');
+  });
 
   var STRAT_NAMES = { fanfield: 'Fanfield', triangulacao: 'Triangulação', multicamada: 'Multicamada' };
 
   function renderPlanPanel() {
     var out = $('#planOut');
     out.textContent = '';
-    // simulação não vai para o modo em campo: os links dependem de chaves que você ainda não tem
-    $('#startBtn').disabled = !(plan && plan.links.length) || !!(plan && plan.simulation);
+    updateOptBtn();
+    var pinBtn = $('#pinBtn');
+    pinBtn.disabled = !(plan && plan.links.length);
+    pinBtn.textContent = isPinned() ? '📌 Fixado · soltar' : '📌 Fixar plano';
+    pinBtn.classList.toggle('on', isPinned());
+    var kn = plan ? FPPlan.keyNeeds(plan, db.portals) : null;
+    // simulação só vai para o modo em campo fixada e com todas as chaves (mesmo plano, sem recalcular)
+    $('#startBtn').disabled = !(plan && plan.links.length) || !!(plan.simulation && !(isPinned() && !kn.totalMissing));
     if (!plan) {
       out.appendChild(el('p', { class: 'muted', text: 'Cadastre portais (toque longo no mapa, ou aba Portais) e toque em “Calcular plano”.' }));
       return;
@@ -452,6 +537,23 @@
       el('div', { class: 'stat' }, [el('b', { text: fmtDist(plan.distance) }), el('span', { text: 'a pé' })])
     ]);
     out.appendChild(stats);
+    if (isPinned()) {
+      out.appendChild(el('div', { class: 'pin-banner', text: '📌 Plano fixado (calculado em ' + new Date(db.plan.ts).toLocaleString('pt-BR') +
+        (db.plan.appVersion ? ', v' + db.plan.appVersion : '') + '). Não muda com GPS, tempo, chaves ou edição de portais: só pelo ⟳ Recalcular.' }));
+    }
+    var val = busy ? null : planValidation();
+    if (val && !val.ok) {
+      var box = el('div', { class: 'plan-warn' }, [el('b', { text: '⚠ O plano não bate com os dados atuais' +
+        (val.steps.length ? ' (passo' + (val.steps.length > 1 ? 's ' : ' ') + val.steps.join(', ') + ')' : '') + ':' })]);
+      var wl = el('ul');
+      val.issues.slice(0, 8).forEach(function (x) {
+        wl.appendChild(el('li', { text: (x.step ? 'Passo ' + x.step + ' · link #' + x.n + ': ' : '') + x.text }));
+      });
+      if (val.issues.length > 8) wl.appendChild(el('li', { text: 'e mais ' + (val.issues.length - 8) + '.' }));
+      box.appendChild(wl);
+      box.appendChild(el('div', { class: 'small', text: isPinned() ? 'O plano fixado não foi recalculado. Corrija os dados ou toque em ⟳ Recalcular.' : 'Toque em Calcular plano para refazer.' }));
+      out.appendChild(box);
+    }
     if (plan.links.length) {
       var tt = FPGeo.travelTimes(plan.steps.map(function (s) { return s.walk; }), plan.links.length);
       out.appendChild(el('div', { class: 'times' }, [
@@ -466,7 +568,9 @@
     }
     if (plan.simulation) {
       out.appendChild(el('div', { class: 'sim-banner', text: '🧪 Simulação: plano ideal pela posição dos portais, sem considerar suas chaves. ' +
-        'Use a lista de farm abaixo para buscar as chaves; depois desligue a simulação para executar em campo.' }));
+        (isPinned() && !kn.totalMissing && plan.links.length
+          ? '✅ Você já tem todas as chaves: toque em Modo em campo para executar este mesmo plano, sem recalcular.'
+          : 'Use a lista de farm abaixo para buscar as chaves; com todas elas, o Modo em campo executa este mesmo plano.') }));
     }
     if (plan.fields.length) {
       out.appendChild(el('p', { class: 'muted small', text: 'Área total dos campos: ' + fmtArea(plan.area) +
@@ -475,7 +579,7 @@
     var meta = (STRAT_NAMES[plan.strategy] || '–') + (plan.anchor ? ' · âncora: ' + pname(plan.anchor) : '') +
       (plan.base ? ' · base: ' + pname(plan.base[0]) + ' – ' + pname(plan.base[1]) + ' · ' + plan.layers + ' camada(s)' : '') +
       ' · ' + (plan.inRadius > plan.candidates
-        ? plan.candidates + ' de ' + plan.inRadius + ' portais ' + (lastOptPos ? 'no raio ' : '') + 'considerados (com chave e mais próximos primeiro)'
+        ? plan.candidates + ' de ' + plan.inRadius + ' portais ' + (plan.origin ? 'no raio ' : '') + 'considerados (com chave e mais próximos primeiro)'
         : plan.candidates + ' portal(is) no raio') + ' · ' + plan.elapsedMs + ' ms';
     out.appendChild(el('p', { class: 'muted small', text: meta }));
 
@@ -483,7 +587,7 @@
       out.appendChild(el('p', { class: 'muted', text: 'Nenhum link possível.' }));
       // diz qual é o motivo mais provável, em vez de uma lista genérica
       // só os portais que entram no cálculo (dentro do raio, quando há GPS)
-      var noRaio = db.portals.filter(function (p) { return !lastOptPos || FPGeo.haversine(lastOptPos, p) <= db.settings.radius; });
+      var noRaio = db.portals.filter(function (p) { return !plan.origin || FPGeo.haversine(plan.origin, p) <= db.settings.radius; });
       var semChave = noRaio.filter(function (p) { return !p.chaves; }).length;
       var nivel1 = noRaio.filter(function (p) { return p.nivel === 1; }).length;
       var dicas = el('ul', { class: 'list' });
@@ -511,29 +615,34 @@
       out.appendChild(ol);
     }
 
-    if (plan.keysUsed.length) {
+    renderKeys(out, kn);
+  }
+
+  /** Chaves consumidas, faltantes e lista de farm, sempre com as chaves de agora (db.portals). */
+  function renderKeys(out, kn) {
+    var keyRow = function (k) { return el('li', null, [el('b', { text: pname(k.portal) }), el('span', { class: 'muted', text: ' · faltam ' + k.missing + ' (precisa ' + k.need + ', tem ' + k.have + ')' })]); };
+    if (kn.used.length) {
       out.appendChild(el('h3', { text: 'Chaves consumidas' }));
       var tb = el('tbody');
-      plan.keysUsed.forEach(function (k) {
-        tb.appendChild(el('tr', null, [el('td', { text: pname(k.portal) }), el('td', { class: 'n', text: String(k.used) }), el('td', { class: 'n', text: String(k.have) })]));
+      kn.used.forEach(function (k) {
+        tb.appendChild(el('tr', { class: k.used > k.have ? 'short' : '' }, [el('td', { text: pname(k.portal) }), el('td', { class: 'n', text: String(k.used) }), el('td', { class: 'n', text: String(k.have) })]));
       });
       out.appendChild(el('table', null, [el('thead', null, [el('tr', null, [el('th', { text: 'Portal' }), el('th', { class: 'n', text: 'usar' }), el('th', { class: 'n', text: 'tem' })])]), tb]));
     }
-    if (plan.keysMissing.length) {
-      if (plan.simulation) {
-        var totalFarm = plan.keysMissing.reduce(function (a, k) { return a + k.missing; }, 0);
-        out.appendChild(el('h3', { text: '🔑 Lista de farm' }));
-        out.appendChild(el('p', { class: 'farm-total', text: 'Faltam ' + totalFarm + ' chave(s) em ' + plan.keysMissing.length + ' portal(is) para executar este plano.' }));
-      } else {
-        out.appendChild(el('h3', { text: 'Chaves faltantes' }));
-        var gain = plan.potentialFields - plan.fields.length;
-        if (gain > 0) out.appendChild(el('p', { class: 'muted small', text: 'Com essas chaves, a mesma rota renderia ' + plan.potentialFields + ' campos (+' + gain + ').' }));
-      }
+    if (kn.missing.length) {
+      out.appendChild(el('h3', { text: plan.simulation ? '🔑 Lista de farm' : 'Chaves faltantes' }));
+      out.appendChild(el('p', { class: 'farm-total', text: 'Faltam ' + kn.totalMissing + ' chave(s) em ' + kn.missing.length + ' portal(is) para executar este plano.' }));
       var ul = el('ul', { class: 'list' });
-      plan.keysMissing.forEach(function (k) {
-        ul.appendChild(el('li', null, [el('b', { text: pname(k.portal) }), el('span', { class: 'muted', text: ' · faltam ' + k.missing + ' (precisa ' + k.need + ', tem ' + k.have + ')' })]));
-      });
+      kn.missing.forEach(function (k) { ul.appendChild(keyRow(k)); });
       out.appendChild(ul);
+    }
+    if (kn.extra.length) {
+      out.appendChild(el('h3', { text: 'Chaves para mais campos' }));
+      var gain = plan.potentialFields - plan.fields.length;
+      if (gain > 0) out.appendChild(el('p', { class: 'muted small', text: 'Com essas chaves, a mesma rota renderia ' + plan.potentialFields + ' campos (+' + gain + ').' }));
+      var ux = el('ul', { class: 'list' });
+      kn.extra.forEach(function (k) { ux.appendChild(keyRow(k)); });
+      out.appendChild(ux);
     }
   }
 
@@ -666,7 +775,8 @@
     var now = new Date();
     r.appendChild(el('h1', { text: 'Plano de campos' }));
     r.appendChild(el('p', { class: 'pr-meta', text: 'Field Planner v' + VERSION + ' · ' + now.toLocaleString('pt-BR') +
-      (plan.origin ? ' · partida A: ' + plan.origin.lat.toFixed(5) + ', ' + plan.origin.lng.toFixed(5) : '') }));
+      (plan.origin ? ' · partida A: ' + plan.origin.lat.toFixed(5) + ', ' + plan.origin.lng.toFixed(5) : '') +
+      (isPinned() ? ' · 📌 plano fixado, calculado em ' + new Date(db.plan.ts).toLocaleString('pt-BR') : '') }));
     if (plan.simulation) r.appendChild(el('p', { class: 'pr-warn', text: 'Simulação: plano ideal pela posição dos portais, sem considerar suas chaves. Use a lista de farm para buscar as chaves antes de executar.' }));
     var tt = FPGeo.travelTimes(plan.steps.map(function (s) { return s.walk; }), plan.links.length);
     r.appendChild(el('table', { class: 'pr-stats' }, [el('tbody', null, [
@@ -707,24 +817,26 @@
     });
     r.appendChild(el('table', { class: 'pr-table' }, [el('thead', null, [el('tr', null, [
       el('th', { class: 'n', text: '#' }), el('th', { text: 'Ir até' }), el('th', { class: 'n', text: 'Andar' }), el('th', { text: 'Links' })])]), tb]));
-    if (plan.keysUsed.length) {
+    var kn = FPPlan.keyNeeds(plan, db.portals); // chaves de agora, não as do momento do cálculo
+    if (kn.used.length) {
       r.appendChild(el('h2', { text: 'Chaves consumidas' }));
       var kb = el('tbody');
-      plan.keysUsed.forEach(function (k) {
+      kn.used.forEach(function (k) {
         kb.appendChild(el('tr', null, [el('td', { text: pname(k.portal) }), el('td', { class: 'n', text: String(k.used) }), el('td', { class: 'n', text: String(k.have) })]));
       });
       r.appendChild(el('table', { class: 'pr-table' }, [el('thead', null, [el('tr', null, [el('th', { text: 'Portal' }), el('th', { class: 'n', text: 'Usar' }), el('th', { class: 'n', text: 'Tem' })])]), kb]));
     }
-    if (plan.keysMissing.length) {
-      var total = plan.keysMissing.reduce(function (a, k) { return a + k.missing; }, 0);
-      r.appendChild(el('h2', { text: plan.simulation ? 'Lista de farm' : 'Chaves faltantes' }));
-      r.appendChild(el('p', { text: 'Faltam ' + total + ' chave(s) em ' + plan.keysMissing.length + ' portal(is).' }));
+    [[kn.missing, plan.simulation ? 'Lista de farm' : 'Chaves faltantes'], [kn.extra, 'Chaves para mais campos']].forEach(function (sec) {
+      if (!sec[0].length) return;
+      var total = sec[0].reduce(function (a, k) { return a + k.missing; }, 0);
+      r.appendChild(el('h2', { text: sec[1] }));
+      r.appendChild(el('p', { text: 'Faltam ' + total + ' chave(s) em ' + sec[0].length + ' portal(is).' }));
       var fb = el('tbody');
-      plan.keysMissing.forEach(function (k) {
+      sec[0].forEach(function (k) {
         fb.appendChild(el('tr', null, [el('td', { text: '☐ ' + pname(k.portal) }), el('td', { class: 'n', text: String(k.missing) }), el('td', { class: 'n', text: k.have + ' / ' + k.need })]));
       });
       r.appendChild(el('table', { class: 'pr-table' }, [el('thead', null, [el('tr', null, [el('th', { text: 'Portal' }), el('th', { class: 'n', text: 'Faltam' }), el('th', { class: 'n', text: 'Tem / precisa' })])]), fb]));
-    }
+    });
     r.appendChild(el('p', { class: 'pr-note', text: 'Gerado no aparelho pelo Field Planner. Posições inseridas pelo usuário (podem ser aproximadas); confira no jogo. O plano não substitui o jogo: toda ação acontece em campo.' }));
   }
 
@@ -792,6 +904,8 @@
     save();
     renderPortals();
     renderPortalList();
+    renderPlanPanel(); // "tem", farm e faltantes vêm das chaves de agora
+    renderField();
   }
 
   var levelSel = $('#portalForm').elements.nivel;
@@ -931,9 +1045,9 @@
     });
   });
 
-  // Mudança de dados invalida o plano (recalcula se já havia um).
+  // Mudança de dados invalida o plano (recalcula se já havia um e não está fixado; o fixado só é revalidado).
   function invalidatePlan() {
-    if (plan) optimize('dados alterados');
+    if (plan) autoOptimize('dados alterados');
     renderAll();
   }
 
@@ -999,7 +1113,8 @@
   $('#exportBtn').addEventListener('click', function () {
     var data = {
       app: 'field-planner', version: 1, exportedAt: new Date().toISOString(),
-      portals: db.portals, blockers: db.blockers, done: db.done, excluded: db.excluded, coveredManual: db.coveredManual, settings: db.settings
+      portals: db.portals, blockers: db.blockers, done: db.done, excluded: db.excluded, coveredManual: db.coveredManual, settings: db.settings,
+      plan: db.plan
     };
     var blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     var a = el('a', { href: URL.createObjectURL(blob), download: 'field-planner-' + new Date().toISOString().slice(0, 10) + '.json' });
@@ -1083,6 +1198,23 @@
     if (db.portals.length) map.fitBounds(L.latLngBounds(db.portals.map(function (p) { return [p.lat, p.lng]; })).pad(0.2));
     invalidatePlan();
     toast('Importado: ' + added + ' novo(s), ' + updated + ' atualizado(s)' + (kept ? ', ' + kept + ' já existente(s) mantido(s)' : '') + ', ' + nb + ' bloqueador(es)', 5000);
+    var rec = Array.isArray(data) ? null : FPPlan.sanitizeRecord(data.plan);
+    if (rec && rec.result.links.length) offerPlanRestore(rec);
+  }
+
+  /** Arquivo com plano: oferece restaurar (substitui o plano atual, sem recalcular). */
+  function offerPlanRestore(rec) {
+    var r = rec.result;
+    confirmDialog('Plano no arquivo', 'O arquivo traz um plano' + (rec.pinned ? ' fixado' : '') + (r.simulation ? ' de simulação' : '') +
+      (rec.ts ? ' calculado em ' + new Date(rec.ts).toLocaleString('pt-BR') : '') + ', com ' + r.links.length + ' link(s) e ' + r.fields.length +
+      ' campo(s). Restaurar? Ele substitui o plano atual.').then(function (ok) {
+      if (!ok) return;
+      cancelPending(); // um recálculo disparado pela importação não pode sobrescrever o plano restaurado
+      setPlanRecord(rec);
+      renderAll();
+      var v = planValidation();
+      toast(v && !v.ok ? '⚠ Plano restaurado, mas não bate com os dados atuais: veja o aviso no painel' : 'Plano restaurado', 5000);
+    });
   }
 
   /* ------------------------------------------------------------ */
@@ -1321,7 +1453,7 @@
     $('#field').hidden = !on;
     if (on) {
       if (!plan || !plan.links.length) { setFieldMode(false); toast('Calcule um plano antes'); return; }
-      if (pos && lastOptPos && FPGeo.haversine(pos, lastOptPos) > MOVE_RECALC_M) optimize('posição atualizada');
+      if (pos && lastOptPos && FPGeo.haversine(pos, lastOptPos) > MOVE_RECALC_M) autoOptimize('posição atualizada');
       var s = currentStep(), p = s && portalById(s.portal);
       if (p) map.setView([p.lat, p.lng], Math.max(map.getZoom(), 17));
       // mantém a tela acesa, se suportado
@@ -1340,7 +1472,7 @@
       $('#fStep').textContent = 'Plano concluído';
       $('#fTarget').textContent = 'Nada mais a fazer 🎉';
       $('#fDist').textContent = db.done.length + ' link(s) feitos nesta sessão';
-      $('#fLink').textContent = 'Toque em Recalcular se algo mudou.';
+      $('#fLink').textContent = isPinned() ? 'Plano fixado concluído. Toque em Recalcular para um plano novo.' : 'Toque em Recalcular se algo mudou.';
       $('#fDone').disabled = $('#fFail').disabled = true;
       return;
     }
@@ -1362,11 +1494,16 @@
     link.appendChild(el('div', null, [el('span', { class: 'num', text: '#' + l.n }), document.createTextNode((p ? p.nome : '?') + ' → ' + (q ? q.nome : '?'))]));
     var rest = s.links.slice(1).map(function (x) { return '#' + x.n + ' → ' + pname(x.to); }).join(', ');
     link.appendChild(el('small', { text: (l.fields ? '+' + l.fields + ' campo(s) · ' : '') + 'chaves de ' + (q ? q.nome : '?') + ': ' + (q ? q.chaves : 0) + (rest ? ' · depois: ' + rest : '') }));
+    var val = busy ? null : planValidation();
+    var bad = val ? val.issues.filter(function (x) { return x.n === l.n; }) : [];
+    if (bad.length) link.appendChild(el('div', { class: 'field-warn', text: '⚠ ' + bad.map(function (x) { return x.text; }).join('; ') }));
   }
 
   function snapshot() {
     return JSON.stringify({ done: db.done, excluded: db.excluded, blockers: db.blockers, coveredManual: db.coveredManual,
-      keys: db.portals.map(function (p) { return [p.id, p.chaves]; }) });
+      keys: db.portals.map(function (p) { return [p.id, p.chaves]; }),
+      // plano fixado não é recalculado: o desfazer devolve também os passos que tinham saído dele
+      plan: isPinned() ? { steps: plan.steps, links: plan.links } : null });
   }
   function pushUndo() { undoStack.push(snapshot()); if (undoStack.length > 30) undoStack.shift(); }
 
@@ -1377,6 +1514,7 @@
     var l = s.links.shift();
     plan.links = plan.links.filter(function (x) { return x.n !== l.n; });
     if (!s.links.length) plan.steps.shift();
+    save(); // o progresso fica no plano salvo
     renderPlanOnMap();
     renderField();
   }
@@ -1392,7 +1530,8 @@
     if (navigator.vibrate) navigator.vibrate(30);
     advanceLocal();
     renderLinks();
-    optimize('link #' + l.n + ' concluído');
+    autoOptimize('link #' + l.n + ' concluído');
+    renderPlanPanel();
   });
 
   $('#fFail').addEventListener('click', function () {
@@ -1410,7 +1549,15 @@
     if (!l || !v || v === 'cancel') return;
     if (v === 'blocked') {
       // registra o bloqueador que o jogador viu e recalcula
-      openBlockerDlg(null, null, function () { pushUndoAfter(); optimize('bloqueador adicionado'); renderAll(); });
+      openBlockerDlg(null, null, function () {
+        pushUndoAfter();
+        if (!autoOptimize('bloqueador adicionado')) {
+          var cur = currentLink(); // plano fixado: pula o link bloqueado e segue na mesma ordem
+          if (cur && cur.from === l.from && cur.to === l.to) advanceLocal();
+          toast('Plano fixado: link pulado, sem recalcular. Use ⟳ Recalcular se quiser outro plano.', 4000);
+        }
+        renderAll();
+      });
       return;
     }
     pushUndo();
@@ -1425,7 +1572,7 @@
     save();
     var cur = currentLink();
     if (cur && cur.from === l.from && cur.to === l.to) advanceLocal(); // só se o plano não mudou
-    optimize('link #' + l.n + ' falhou');
+    if (!autoOptimize('link #' + l.n + ' falhou')) toast('Plano fixado: link pulado, sem recalcular. Use ⟳ Recalcular se quiser outro plano.', 4000);
     renderAll();
   });
   // Desfazer de bloqueador: o snapshot é tirado antes do push; reconstruímos removendo o último.
@@ -1442,11 +1589,12 @@
     var snap = JSON.parse(s);
     db.done = snap.done; db.excluded = snap.excluded; db.blockers = snap.blockers; db.coveredManual = snap.coveredManual;
     snap.keys.forEach(function (kv) { var p = portalById(kv[0]); if (p) p.chaves = kv[1]; });
+    if (snap.plan && isPinned()) { plan.steps = snap.plan.steps; plan.links = snap.plan.links; }
     save();
-    optimize('desfeito');
+    autoOptimize('desfeito');
     renderAll();
   });
-  $('#fRecalc').addEventListener('click', function () { optimize('recalculado manualmente'); });
+  $('#fRecalc').addEventListener('click', function () { manualOptimize('recalculado manualmente'); });
   $('#fExit').addEventListener('click', function () { setFieldMode(false); });
 
   /* ------------------------------------------------------------ */
@@ -1483,7 +1631,7 @@
     navigator.serviceWorker.addEventListener('controllerchange', function () {
       if (!hadController) { hadController = true; return; } // primeira instalação, nada a avisar
       var justOpened = performance.now() < 20000;
-      var busyUi = fieldMode || plan || moving || document.querySelector('dialog[open]'); // plano só existe em memória
+      var busyUi = fieldMode || moving || document.querySelector('dialog[open]'); // o plano fica salvo: recarregar não o perde
       if (justOpened && !busyUi) { location.reload(); return; } // acabou de abrir: troca já
       var bar = $('#updateBar');
       if (bar) bar.hidden = false;

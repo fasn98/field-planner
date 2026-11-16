@@ -2,6 +2,22 @@
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Datas no formato AAAA-MM-DD.
 
+## [1.8.0] — 2026-11-16
+### Adicionado
+- **Plano fixo**: o plano fica salvo no aparelho (`db.plan` no localStorage) com o resultado completo e as entradas usadas no cálculo: partida, configurações, ids dos candidatos, data/hora e versão do app. Ao reabrir, o app restaura o plano como está, sem recalcular (`plan.js`, `makeRecord`/`sanitizeRecord`).
+- **📌 Fixar plano** (aba Plano): um plano fixado nunca é recalculado sozinho, nem por GPS (> 100 m), nem a cada 5 min, nem por dados alterados, nem por troca de simulação. Só pelo **⟳ Recalcular**, que pede confirmação ("Isso substitui o plano fixado. Continuar?"). Plano calculado em simulação é fixado automaticamente (`plan.js`, `autoRecalcReason`).
+- **Validação do plano salvo** contra os dados atuais, sem recalcular: refaz os links restantes na mesma ordem e avisa, com os passos afetados, quando um portal do plano foi excluído ou movido mais de 30 m, quando um link passou a cruzar um bloqueador, ou quando um link fecha menos campos que antes. No modo em campo, o aviso aparece no link atual (`plan.js`, `validate`).
+- **Simulação → campo sem recalcular**: com o plano de simulação fixado e todas as chaves da lista de farm, **Modo em campo** (ou desligar a simulação) usa a mesma ordem e os mesmos links, conferidos com as chaves reais. Se faltar chave ou algum link não for mais possível, o plano continua como simulação e o app diz qual passo falha (`plan.js`, `toFieldPlan`).
+- Exportar JSON inclui o plano (chave `plan`). Importar um arquivo com plano pergunta se deve restaurá-lo.
+- `tests/plan.test.js` (97 testes no total).
+
+### Corrigido
+- "Tem", "Chaves consumidas", lista de farm, chaves faltantes e o total agora vêm das chaves de agora, não do momento do cálculo. Tocar em 🔑 + / − atualiza o plano na hora. Antes, o PDF mostrava "Tem 0" para portais com chave.
+
+### Alterado
+- Em campo, **✓ Concluído** e **✕ Falhou** num plano fixado avançam para o próximo link sem recalcular, e o progresso fica salvo. **↶ Desfazer** devolve o link ao plano.
+- Uma atualização do app pode recarregar a página com um plano aberto, porque o plano não se perde mais.
+
 ## [1.7.1] — 2026-11-15
 ### Alterado
 - **Nível padrão L5**: portal novo, importação em lote e arquivo importado sem nível entram como L5, não mais L1 (L1 alcança só 160 m e quase nunca fecha campo). Portais já cadastrados não mudam.

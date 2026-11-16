@@ -30,7 +30,7 @@ test('texto sem coordenadas devolve null', () => {
 // Conformidade: nenhum arquivo de código do app referencia domínios da Niantic.
 test('código do app não contém domínios da Niantic', () => {
   const root = path.join(__dirname, '..');
-  const files = ['index.html', 'app.js', 'geo.js', 'optimizer.js', 'worker.js', 'sw.js', 'manifest.webmanifest'];
+  const files = ['index.html', 'app.js', 'geo.js', 'optimizer.js', 'plan.js', 'worker.js', 'sw.js', 'manifest.webmanifest'];
   const forbidden = /(ingress\.com|nianticlabs\.com|nianticspatial\.com|niantic\.com)/i;
   for (const f of files) {
     const src = fs.readFileSync(path.join(root, f), 'utf8');

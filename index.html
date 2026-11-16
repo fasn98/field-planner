@@ -147,6 +147,12 @@
   .sim-toggle input { width: 24px; min-height: 24px; margin-top: 2px; flex-shrink: 0; }
   .sim-banner { background: rgba(210,153,34,.15); border: 1px solid var(--warn); color: var(--text); border-radius: 12px; padding: 10px 12px; margin: 8px 0; font-size: 14px; }
   .farm-total { font-size: 15px; margin: 6px 0; }
+  .pin-banner { background: rgba(88,166,255,.12); border: 1px solid #58a6ff; border-radius: 12px; padding: 10px 12px; margin: 8px 0; font-size: 14px; }
+  .plan-warn { background: rgba(248,81,73,.12); border: 1px solid #f85149; border-radius: 12px; padding: 10px 12px; margin: 8px 0; font-size: 14px; }
+  .plan-warn ul { margin: 6px 0; padding-left: 18px; }
+  .field-warn { color: #f85149; font-size: 13px; margin-top: 4px; }
+  #pinBtn.on { border-color: #58a6ff; color: #58a6ff; }
+  tr.short td { color: #f85149; }
   .fab { position: fixed; right: 12px; z-index: 1000; width: 52px; height: 52px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); font-size: 22px; }
   .export-box { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; margin: 8px 0; display: grid; gap: 8px; }
   .export-box .row { margin: 0; }
@@ -223,6 +229,9 @@
       <div class="row">
         <button id="optBtn" class="btn primary grow">Calcular plano</button>
         <button id="startBtn" class="btn grow" disabled>Modo em campo</button>
+      </div>
+      <div class="row">
+        <button id="pinBtn" class="btn grow" disabled title="Plano fixado não é recalculado sozinho (GPS, tempo, edição de dados)">📌 Fixar plano</button>
       </div>
       <div id="planOut"><p class="muted">Cadastre portais (toque longo no mapa, ou aba Portais) e toque em “Calcular plano”.</p></div>
     </section>
@@ -412,6 +421,8 @@
 
 <script src="vendor/leaflet/leaflet.js"></script>
 <script src="geo.js"></script>
+<script src="optimizer.js"></script>
+<script src="plan.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

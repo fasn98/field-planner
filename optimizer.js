@@ -472,6 +472,7 @@
       base: best && best.policy.type === 'layers' ? best.policy.base.map(function (i) { return world.pts[i].id; }) : null,
       layers: best && best.policy.type === 'layers' ? best.res.fields : 0,
       candidates: world.candidates.length,
+      candidateIds: world.candidates.map(function (i) { return world.pts[i].id; }),
       inRadius: world.inRadius,
       steps: [], links: [], fields: [], distance: 0, ap: 0, area: 0, simulation: !!input.ignoreKeys,
       keysUsed: [], keysMissing: [], potentialFields: 0,

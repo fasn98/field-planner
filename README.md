@@ -64,7 +64,7 @@ tela inicial" instala o app e ele abre sem internet (os tiles já visualizados f
 > sem uso. Instale o app na tela inicial e exporte o JSON regularmente (Ajustes → Exportar).
 
 > **Atualização:** é automática. O app procura versão nova ao abrir, ao voltar para ele e a cada 30 min.
-> Logo depois de abrir, se não houver modo em campo, plano nem diálogo aberto, ele recarrega sozinho. Com o
+> Logo depois de abrir, se não houver modo em campo nem diálogo aberto, ele recarrega sozinho (o plano fica salvo). Com o
 > app em uso, aparece o aviso "Nova versão disponível": toque para recarregar. A versão aparece no fim da
 > aba Ajustes.
 
@@ -77,8 +77,10 @@ tela inicial" instala o app e ele abre sem internet (os tiles já visualizados f
 - **Ajustes → Simular sem chaves** → calcula o melhor plano que a posição dos portais permite, ignorando
   as chaves que você tem. O plano mostra um aviso de simulação e a **Lista de farm**: quantas chaves
   faltam de cada portal, com o total (`app.js:354`).
-- Na simulação, os candidatos são cortados só por distância. O **modo em campo fica desabilitado**
-  (`app.js:400`): desligue a simulação para sair a campo.
+- Na simulação, os candidatos são cortados só por distância. O plano de simulação é **fixado
+  automaticamente** (ver Plano fixo). O **modo em campo** só libera quando você tiver todas as chaves da lista
+  de farm, e então executa **o mesmo plano**, na mesma ordem e com os mesmos links, conferido com as chaves
+  reais, sem recalcular.
 - **Ajustes → Objetivo → Máx. área (≈ MU)** → a área decide o plano. A área é só um proxy do MU: o MU
   real depende da densidade populacional, que o app não conhece. Compare áreas apenas dentro da mesma
   região. Cada camada conta: campos empilhados somam a área de todos.
@@ -136,6 +138,17 @@ Na lista de portais, os botões `−`/`+` ajustam chaves rapidamente.
    - **📄 Exportar plano em PDF:** abre a janela de impressão do navegador com um relatório: resumo, croqui
      do plano (rota, links numerados e campos, sem mapa de fundo), links da rota no Google Maps, passos com
      coordenadas, chaves consumidas e lista de farm. Escolha **Salvar como PDF**. Tudo é gerado no aparelho.
+   - **Plano fixo (📌 Fixar plano):** todo plano fica salvo no aparelho e volta igual ao reabrir o app,
+     sem recalcular. Com o plano **fixado**, nada recalcula sozinho (nem GPS, nem tempo, nem edição de
+     portais, chaves ou bloqueadores, nem troca de simulação). Só o **⟳ Recalcular** substitui o plano, e ele
+     pede confirmação. Plano de simulação é fixado automaticamente. Toque de novo no botão para soltar.
+   - **Chaves ao vivo:** "tem", chaves consumidas, lista de farm e o total de faltantes usam as chaves
+     cadastradas agora. Tocar em 🔑 + / − atualiza o plano na hora (`plan.js`, `keyNeeds`).
+   - **Aviso de plano desatualizado:** sem recalcular, o app refaz os links restantes sobre os dados atuais
+     e lista os passos afetados quando um portal do plano foi excluído ou movido mais de 30 m, quando um link
+     cruza um bloqueador ou não é mais possível, ou quando fecha menos campos (`plan.js`, `validate`).
+   - **Exportar/importar:** o JSON exportado leva o plano (chave `plan`). Ao importar um arquivo com plano,
+     o app pergunta se deve restaurá-lo.
 2. **Modo em campo**: o passo atual em destaque, distância e rumo até o portal, e dois botões grandes:
    - **✓ Concluído** — registra o link como feito, desconta 1 chave do destino, recalcula.
    - **✕ Falhou** — pergunta o motivo: *bloqueado por outro link* (você cadastra o bloqueador),
@@ -143,8 +156,9 @@ Na lista de portais, os botões `−`/`+` ajustam chaves rapidamente.
      *outro* (o par é pulado). Depois recalcula.
    - **↶ Desfazer** e **⟳ Recalcular**.
 
-Recálculo automático: ao se mover **> 100 m** desde o último cálculo, a cada **5 min** no modo em campo,
-e a cada passo concluído/falho.
+Recálculo automático (só com o plano **solto**): ao se mover **> 100 m** desde o último cálculo, a cada
+**5 min** no modo em campo, e a cada passo concluído ou falho. Com o plano fixado, Concluído e Falhou só
+avançam para o próximo link do mesmo plano, e o progresso fica salvo.
 
 ---
 
@@ -204,9 +218,13 @@ junto com quantos campos a mais isso renderia.
 - A seta do modo em campo é relativa ao norte quando o GPS não fornece direção de movimento.
 - Cada cálculo considera no máximo 30 portais (com chave e mais próximos primeiro); com mais portais no
   raio, um portal útil mais distante e sem chave pode ficar de fora. O plano informa "N de M considerados".
-- Cada recálculo pode trocar de estratégia ou de âncora no meio de um fanfield.
+- Cada recálculo de um plano solto pode trocar de estratégia ou de âncora no meio de um fanfield. Fixe o
+  plano para evitar isso.
+- Num plano fixado, pular um link (Falhou) não refaz os seguintes: se ele fechava um campo usado depois, o
+  aviso de plano desatualizado mostra os passos afetados.
 - Os tiles em cache não expiram (máximo de 3000, `sw.js:11`).
-- Os fluxos de `app.js` e `sw.js` não têm teste automatizado.
+- Os fluxos de `app.js` e `sw.js` não têm teste automatizado. As regras do plano fixo estão em `plan.js`
+  e têm teste (`tests/plan.test.js`).
 
 ---
 
@@ -223,9 +241,20 @@ junto com quantos campos a mais isso renderia.
   "done": [ { "from": "p1", "to": "p2", "ts": 1763050000000 } ],
   "excluded": [],
   "coveredManual": [],
-  "settings": { "radius": 1500, "maxOut": 8, "objective": "campos", "strategy": "auto" }
+  "settings": { "radius": 1500, "maxOut": 8, "objective": "campos", "strategy": "auto" },
+  "plan": {
+    "v": 1, "ts": 1763300000000, "appVersion": "1.8.0", "pinned": true,
+    "origin": { "lat": -23.55, "lng": -46.63 },
+    "settings": { "radius": 1500, "maxOut": 8, "objective": "campos", "strategy": "auto", "simulate": true },
+    "candidates": ["p1", "p2"],
+    "positions": { "p1": [-23.5505, -46.6333] },
+    "result": { "steps": [], "links": [], "fields": [], "simulation": true }
+  }
 }
 ```
+
+`plan` é opcional: o resultado completo do otimizador (`result`) e as entradas do cálculo. `positions` são
+as posições dos portais do plano no momento do cálculo, usadas para avisar quando um portal foi movido.
 
 Também aceita um array simples de portais. Importação mescla por `id` (mesmo id → atualiza).
 Valores são validados e limitados (nível 1–8, chaves 0–999, textos com tamanho máximo).
@@ -249,6 +278,7 @@ npm test     # node --test, sem dependências
 | `tests/optimizer.test.js` | fanfield, links não se cruzam, bloqueador, chaves, limite de saída, alcance por nível, raio, pares falhos, 2-opt |
 | `tests/parse-and-compliance.test.js` | extração de coordenadas; ausência de domínios da Niantic no código; CSP; `VERSION` igual em `app.js`, `sw.js` e `package.json` |
 | `tests/bulk-import.test.js` | importação em lote: leitura de linhas (link, coordenadas, nome), prioridade `!3d`/`pll=` em `parseCoords`, links curtos recusados |
+| `tests/plan.test.js` | plano fixo: registro salvo e restaurado igual (JSON), registro adulterado descartado, plano fixado não recalcula por GPS/5 min/dados/simulação, farm e "tem" acompanham as chaves de agora, validação de portal movido (> 30 m), excluído e link cruzando bloqueador, simulação → campo só com todas as chaves |
 | `tests/review-fixes.test.js` | ids `__proto__`/`constructor`/`toString` em portais, bloqueadores, done e excluded; portais na mesma posição nunca linkados; portal visitado sem links vira destino do fan |
 
 ## Publicar uma versão nova
@@ -267,6 +297,7 @@ index.html            UI, estilos e CSP
 app.js                estado, mapa, painéis, modo em campo, GPS (somente leitura)
 geo.js                geometria pura: haversine, interseção, ponto-no-triângulo, alcance, parse de coordenadas
 optimizer.js          otimizador puro (fanfield, triangulação, rota, chaves)
+plan.js               plano fixo: registro salvo, chaves ao vivo, validação contra os dados atuais
 worker.js             Web Worker que roda o otimizador
 sw.js                 service worker offline-first
 manifest.webmanifest  manifesto PWA (+ icon.svg, icon-192.png, icon-512.png)
