@@ -52,6 +52,14 @@
     return hay.indexOf(' ' + key + ' ') >= 0;
   }
 
+  var STREET_IN_TEXT = /(^|[\s,(])(rua|r|avenida|av|alameda|al|travessa|tv|trav|pra[cç]a|p[cç]a|estrada|estr|rodovia|rod|largo|lgo|viela|viaduto|marginal)\.?\s+\S/i;
+
+  /** O portal do app diz em que rua está (sufixo do nome "… - R. X" ou a observação)? Sem isso, a rua não decide nada. */
+  function portalStreetKnown(p) {
+    var parts = String(p.nome || '').split(/\s+[-–]\s*|\s*[-–]\s+/);
+    return (parts.length > 1 && STREET_IN_TEXT.test(' ' + parts.slice(1).join(' '))) || STREET_IN_TEXT.test(' ' + (p.observacao || ''));
+  }
+
   /** Nome provisório (gerado por importação): "BK 070 - …", "CB 12", "BW 5", "GJ 3", "ENS 05", "Portal 07", "Enseada 03 - …". */
   function isProvisional(nome) {
     var s = String(nome || '').trim();
@@ -514,14 +522,20 @@
       });
       // rua do endereço: filtra só se sobrar alguém compatível
       var addr = obs.map(function (o) { return o.endereco; }).filter(Boolean)[0];
-      var streetHit = false;
-      if (addr) {
+      var streetHit = false, notRegistered = null;
+      if (addr && cands.length) {
         var comp = cands.filter(function (p) { return streetCompatible(addr, p) === true; });
         if (comp.length) { cands = comp; streetHit = true; }
+        else if (streetTokens(addr).length && cands.every(portalStreetKnown)) {
+          // nenhum candidato do anel fica na rua do print (e todos dizem a sua rua): o portal certo
+          // provavelmente não está cadastrado; não oferecer "É este" para portais de outra rua
+          notRegistered = { street: String(addr).split(/[,\-–]/)[0].trim(), others: cands.map(function (p) { return p.id; }) };
+          cands = [];
+        }
       }
       var last = obs.slice().sort(function (a, b) { return (b.ts || 0) - (a.ts || 0); })[0];
       var tri = trilaterate(obs);
-      work.push({ key: k, nome: last.nome, obs: obs, cands: cands.map(function (p) { return p.id; }), streetHit: streetHit, last: last, tri: tri });
+      work.push({ key: k, nome: last.nome, obs: obs, cands: cands.map(function (p) { return p.id; }), streetHit: streetHit, last: last, tri: tri, notRegistered: notRegistered });
     });
 
     // trilateração primeiro (sobre os candidatos do anel), propagação depois: assim nenhuma eliminação
@@ -591,7 +605,10 @@
         suggestions.push(sug);
       } else {
         pending.push({ key: w.key, nome: w.nome, candidates: w.cands.slice(), obs: w.obs.length, origins: origins, conflict: w.conflict || null,
-          hint: w.conflict ? 'conflito: "' + w.conflict.join('", "') + '" também só cabe neste portal. Um dos dois não está cadastrado ou tem a posição errada; escolha qual é, se souber'
+          notRegistered: w.notRegistered, otherStreet: w.notRegistered ? w.notRegistered.others : null,
+          hint: w.notRegistered ? 'provavelmente não cadastrado: nenhum portal do app nesse anel fica na ' + w.notRegistered.street +
+              '. Cadastre pelo link do portal (Portais → Colar link)'
+            : w.conflict ? 'conflito: "' + w.conflict.join('", "') + '" também só cabe neste portal. Um dos dois não está cadastrado ou tem a posição errada; escolha qual é, se souber'
             : !w.cands.length && w.obs.every(function (o) { return o.distancia_m >= 1000; }) ? 'a ' + Math.round(w.obs[0].distancia_m / 100) / 10 + ' km (arredondado pelo jogo) a distância não decide: tire um print mais perto'
             : !w.cands.length ? 'nenhum portal provisório do app nesse anel: confira se o portal está cadastrado'
             : 'tire outro print a uns 100 m daqui para separar ' + w.cands.length + ' candidatos' });
@@ -632,6 +649,6 @@
     portalUncertainty: portalUncertainty, sameNamePortal: sameNamePortal, SAME_NAME: SAME_NAME,
     streetTokens: streetTokens, streetCompatible: streetCompatible, isProvisional: isProvisional,
     hungarian: hungarian, fitSimilarity: fitSimilarity, matchMap: matchMap, ringTol: ringTol, trilaterate: trilaterate,
-    matchKeyList: matchKeyList, trustedTri: trustedTri, isDuplicateObs: isDuplicateObs, matchSingle: matchSingle, distinctOrigins: distinctOrigins, localFrame: localFrame
+    matchKeyList: matchKeyList, trustedTri: trustedTri, isDuplicateObs: isDuplicateObs, portalStreetKnown: portalStreetKnown, matchSingle: matchSingle, distinctOrigins: distinctOrigins, localFrame: localFrame
   };
 });

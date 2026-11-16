@@ -8,7 +8,7 @@
   'use strict';
 
   var STORE = 'fieldplanner.v1';
-  var VERSION = '1.10.0';
+  var VERSION = '1.10.1';
   // nível padrão de portal novo ou importado sem nível: L1 só alcança 160 m e quase nunca fecha campo
   var DEFAULT_LEVEL = 5;
   // Qualquer string de 1–64 caracteres sem controle. A segurança contra "constructor"/"__proto__"
@@ -981,20 +981,24 @@
   $('#addPortalBtn').addEventListener('click', function () {
     openPortalDlg(null, pos ? { lat: pos.lat, lng: pos.lng } : map.getCenter());
   });
-  $('#pasteBtn').addEventListener('click', function () {
+  var pasteName = ''; // nome já conhecido (ex.: lido de um print) para o portal cadastrado pelo link
+  function openPasteDlg(nome) {
+    pasteName = nome || '';
     var d = $('#pasteDlg');
     d.querySelector('textarea').value = '';
     d.returnValue = '';
     d.showModal();
-  });
+  }
+  $('#pasteBtn').addEventListener('click', function () { openPasteDlg(''); });
   $('#pasteDlg').addEventListener('close', function () {
-    var d = $('#pasteDlg');
+    var d = $('#pasteDlg'), nome = pasteName;
+    pasteName = '';
     if (d.returnValue !== 'ok') return;
     var text = d.querySelector('textarea').value;
     var c = FPGeo.parseCoords(text);
     if (!c) { toast('Não encontrei coordenadas nesse texto. Digite lat/lng manualmente.', 4000); return; }
     map.setView([c.lat, c.lng], 17);
-    openPortalDlg(null, null, { coords: c });
+    openPortalDlg(null, null, { coords: c, nome: nome });
   });
 
   // Mover portal no mapa: arrastar o marcador ou tocar no ponto certo.
@@ -1983,6 +1987,13 @@
       el('div', null, [el('b', { text: pd.nome }), el('span', { class: 'muted small', text: ' · ' + pd.obs + ' observação(ões) de ' + pd.origins + ' ponto(s)' })]),
       el('div', { class: 'muted small', text: pd.hint })
     ]);
+    if (pd.notRegistered) {
+      // nenhum candidato do anel fica na rua do print: sem "É este" para portais de outra rua
+      var others = (pd.otherStreet || []).map(portalById).filter(Boolean).map(function (p) { return p.nome; });
+      if (others.length) li.appendChild(el('div', { class: 'muted small', text: 'No anel, só portais de outras ruas: ' + others.slice(0, 4).join(' · ') }));
+      li.appendChild(el('div', { class: 'row' }, [el('button', { class: 'btn sm', text: '📎 Cadastrar pelo link', onclick: function () { openPasteDlg(pd.nome); } })]));
+      return li;
+    }
     // empate: o jogador decide qual é (o app nunca escolhe sozinho)
     var row = el('div', { class: 'row' });
     pd.candidates.slice(0, 6).forEach(function (id) {

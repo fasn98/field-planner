@@ -81,6 +81,19 @@ test('16/11: nomes sem portal cadastrado nunca viram renomear com confiança ≥
   }
 });
 
+test('16/11: Estatua Loro Mania (Av. Santo Amaro) sem candidato na mesma rua → provavelmente não cadastrado', { skip: SKIP }, () => {
+  const pd = r.pending.find(p => p.key === byName('Estatua Loro Mania'));
+  assert.ok(pd && pd.notRegistered, JSON.stringify(pd));
+  assert.deepEqual(pd.candidates, []);
+  assert.deepEqual(pd.otherStreet.sort(), ['bw-078', 'cb-026']);
+  assert.match(pd.hint, /provavelmente não cadastrado.*Avenida Santo Amaro/);
+});
+
+test('16/11: Graffiti O Sol E As Rosas continua com os candidatos da R. Guararapes', { skip: SKIP }, () => {
+  const pd = r.pending.find(p => p.key === byName('Graffiti O Sol E As Rosas'));
+  assert.ok(pd && !pd.notRegistered && pd.candidates.includes('cb-039'));
+});
+
 test('16/11: nenhuma sugestão aceitável deixa dois portais com o mesmo nome', { skip: SKIP }, () => {
   const after = new Map(portals.map(p => [p.id, p.nome]));
   for (const s of r.suggestions) if (!s.nameTakenBy) after.set(s.portal, s.nome);

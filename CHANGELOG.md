@@ -2,6 +2,13 @@
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Datas no formato AAAA-MM-DD.
 
+## [1.10.1] — 2026-11-16
+### Alterado
+- **Nomear por print, lista de chaves: a rua do print filtra os candidatos.** Se nenhum portal do anel fica na rua do endereço lido (a comparação normaliza "Av."/"Avenida", acentos e preposições) e todos os candidatos dizem a sua rua, o pendente mostra "provavelmente não cadastrado". Nesse caso não aparecem os botões "É este" para portais de outra rua; aparece **📎 Cadastrar pelo link**, que abre "Colar link" com o nome do print já preenchido.
+  - Caso real: "Estatua Loro Mania" (Av. Santo Amaro, 852,7 m) listava CB 026 (R. Nova York) e BW 078 (R. Ipurinás).
+  - Candidato sem rua no nome, como "Portal 07", não é descartado pela rua.
+- `tests/keylist-scenario.test.js` com 3 casos novos; `tests/real-16112026.test.js` com a Loro Mania (só local).
+
 ## [1.10.0] — 2026-11-16
 A v1.9.0 está reservada para o sync na nuvem (ADR-0002, ainda em decisão).
 

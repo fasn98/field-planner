@@ -25,7 +25,14 @@ const portals = [
   P('BK 001 - R. Zeta', 0, -597),
   P('BK 002 - R. Zeta', -560, -200),
   P('BK 003 - Av. Eta', 600, 603),
-  P('BK 004 - R. Teta', -300, -300)
+  P('BK 004 - R. Teta', -300, -300),
+  // no anel de "Papagaio Festivo" (852,7 m, Av. Eta): o BK 003 fica na Av. Eta; estes dois, em outras ruas
+  P('CB 026 - R. Iota', -852, 30),
+  P('BW 078 - R. Kapa', 30, 855),
+  // no anel de "Leão de Pedra" (Av. Lambda, 420 m) só há provisórios de outras ruas
+  P('BK 005 - R. Mi', 420, 0), P('BK 006 - R. Ni', -415, 40),
+  // provisório sem rua no nome: a rua do print não pode descartá-lo
+  P('Portal 07', 0, 640)
 ];
 const id = (nome) => portals.find(p => p.nome === nome).id;
 
@@ -46,7 +53,9 @@ const leituras = [
   { tipo: 'lista_chaves', escala_m_por_px: null, norte_para_cima: null, portais: [
     L('Metas no céu', 'Av. Épsilon, 588', 1100, 4, 1),
     L('Coruja Tropical', 'Av. Épsilon, 2893', 1100, 1, 1),
-    L('Girafa Azul', 'R. Kapa, 124', 1800, 1, 1)] }
+    L('Girafa Azul', 'R. Kapa, 124', 1800, 1, 1),
+    L('Leão de Pedra', 'Av. Lambda, 77 - Centro', 420, 5, 1),
+    L('Coruja Branca', 'Av. Lambda, 900', 640, 4, 1)] }
 ];
 
 const obs = [];
@@ -64,7 +73,7 @@ const key = M.normName;
 
 test('cenário: linha repetida entre prints conta uma vez só', () => {
   assert.equal(obs.filter(o => key(o.nome) === key('Metas no céu')).length, 1);
-  assert.equal(obs.length, 9);
+  assert.equal(obs.length, 11);
 });
 
 test('cenário: portais já nomeados ficam "já cadastrado" (acento, artigo, erro de digitação, sufixo de rua, ≥ 1 km)', () => {
@@ -101,6 +110,33 @@ test('cenário: nenhuma sugestão aceitável deixa dois portais com o mesmo nome
   for (const s of r.suggestions) if (!s.nameTakenBy) after.set(s.portal, s.nome);
   const ks = [...after.values()].map(M.normName);
   assert.deepEqual(ks.filter((k, i) => ks.indexOf(k) !== i), []);
+});
+
+test('cenário: rua do print desempata o anel (Papagaio Festivo fica só com o BK 003 da Av. Eta)', () => {
+  const k = key('Papagaio Festivo');
+  const ids = [...r.suggestions.filter(s => s.key === k).map(s => s.portal), ...r.pending.filter(p => p.key === k).flatMap(p => p.candidates)];
+  assert.deepEqual(ids, [id('BK 003 - Av. Eta')]);
+});
+
+test('cenário: nenhum candidato do anel na rua do print → "provavelmente não cadastrado", sem "É este"', () => {
+  const pd = r.pending.find(p => p.key === key('Leão de Pedra'));
+  assert.ok(pd && pd.notRegistered, JSON.stringify(pd));
+  assert.deepEqual(pd.candidates, []);
+  // BK 004 (R. Teta, a 424 m) também cai no anel; todos de outras ruas
+  assert.deepEqual(pd.otherStreet.sort(), [id('BK 004 - R. Teta'), id('BK 005 - R. Mi'), id('BK 006 - R. Ni')].sort());
+  assert.match(pd.hint, /provavelmente não cadastrado.*Av\. Lambda.*link do portal/);
+  assert.ok(!r.suggestions.some(s => s.key === key('Leão de Pedra')));
+});
+
+test('cenário: candidato sem rua no nome não é descartado pela rua do print', () => {
+  const k = key('Coruja Branca');
+  const pd = r.pending.find(p => p.key === k), s = r.suggestions.find(x => x.key === k);
+  const ids = s ? [s.portal] : pd.candidates;
+  assert.ok(ids.includes(id('Portal 07')), JSON.stringify(pd || s));
+  assert.ok(!(pd && pd.notRegistered));
+  assert.equal(M.portalStreetKnown({ nome: 'Portal 07' }), false);
+  assert.equal(M.portalStreetKnown({ nome: 'CB 026 - R. Nova York' }), true);
+  assert.equal(M.portalStreetKnown({ nome: 'Metas em Mente- Viaduto Santo Amaro' }), true);
 });
 
 test('cenário: dois portais diferentes com nome parecido na mesma lista não viram um grupo só', () => {
