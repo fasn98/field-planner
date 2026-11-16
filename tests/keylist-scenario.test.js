@@ -197,3 +197,70 @@ test('chaves a mais de 5 km ficam fora dos pendentes, no grupo "longe"; já cada
   assert.ok(g.registered.some(r => r.portal === 'longe1'));
   assert.ok(g.pending.some(p => p.key === key('Grafite Sol Nascente')) || g.suggestions.some(s => s.key === key('Grafite Sol Nascente')));
 });
+
+// ---- bordas de nome cortado e do grupo "longe" (v1.10.2) ----
+test('borda: pedaço com menos de 3 letras não junta com nome inteiro, mesmo no mesmo ponto e distância', () => {
+  const o = [{ nome: 'Es', distancia_m: 200, origem, ts: 1 }, { nome: 'Escultura da Aurora', distancia_m: 200, origem, ts: 2 }];
+  assert.deepEqual(M.mergeTruncated(o).map(x => x.nome), ['Es', 'Escultura da Aurora']);
+});
+
+test('borda: pedaço com exatamente 3 letras junta', () => {
+  const o = [{ nome: 'Esc', distancia_m: 200, origem, ts: 1 }, { nome: 'Escultura da Aurora', distancia_m: 200, origem, ts: 2 }];
+  assert.deepEqual(M.mergeTruncated(o).map(x => x.nome), ['Escultura da Aurora']);
+});
+
+test('borda: dois nomes inteiros com o mesmo prefixo — o pedaço vira o mais longo e os inteiros continuam separados', () => {
+  const o = [
+    { nome: 'Ninhos Dourados', distancia_m: 150, origem, ts: 1 },
+    { nome: 'Ninhos De Pássaro', distancia_m: 150, origem, ts: 2 },
+    { nome: 'Ninhos D', distancia_m: 150, origem, ts: 3 }
+  ];
+  assert.deepEqual(M.mergeTruncated(o).map(x => x.nome).sort(), ['Ninhos De Pássaro', 'Ninhos Dourados']);
+  // ordem inversa dá o mesmo resultado
+  assert.deepEqual(M.mergeTruncated(o.slice().reverse()).map(x => x.nome).sort(), ['Ninhos De Pássaro', 'Ninhos Dourados']);
+});
+
+test('borda: nome inteiro idêntico ao pedaço (mesma linha duas vezes) vira uma observação só', () => {
+  const o = [{ nome: 'Mural Azul', distancia_m: 90, origem, ts: 1 }, { nome: 'Mural Azul', distancia_m: 90, origem, ts: 2 }];
+  assert.equal(M.mergeTruncated(o).length, 1);
+});
+
+test('borda: distância 0,05 m de diferença não junta; 0,04 m junta', () => {
+  const mk = (dd) => [{ nome: 'Mural Az', distancia_m: 90, origem, ts: 1 }, { nome: 'Mural Azul', distancia_m: dd, origem, ts: 2 }];
+  assert.equal(M.mergeTruncated(mk(90.04)).length, 1);
+  assert.equal(M.mergeTruncated(mk(90.5)).length, 2);
+});
+
+test('borda: exatamente 5000 m não vai para "longe"; 5001 m vai', () => {
+  const g = M.matchKeyList([
+    { nome: 'Cidade Vizinha A', distancia_m: 5000, origem, ts: 1 },
+    { nome: 'Cidade Vizinha B', distancia_m: 5001, origem, ts: 1 }
+  ], portals);
+  assert.deepEqual(g.far.map(f => f.nome), ['Cidade Vizinha B']);
+  assert.ok(g.pending.some(p => p.key === key('Cidade Vizinha A')));
+});
+
+test('borda: nome com uma observação longe e outra perto não vai para "longe"', () => {
+  const g = M.matchKeyList([
+    { nome: 'Totem Misto', distancia_m: 30000, origem, ts: 1 },
+    { nome: 'Totem Misto', distancia_m: 300, origem, ts: 2 }
+  ], portals);
+  assert.equal(g.far.length, 0);
+  assert.ok([...g.pending, ...g.suggestions, ...g.registered].some(x => x.key === key('Totem Misto')));
+});
+
+test('borda: lista vazia e observação sem distância não quebram nem criam "longe"', () => {
+  assert.deepEqual(M.matchKeyList([], portals).far, []);
+  assert.deepEqual(M.mergeTruncated(null), []);
+  const g = M.matchKeyList([{ nome: 'Sem Distância', origem, ts: 1 }], portals);
+  assert.equal(g.far.length, 0);
+});
+
+test('borda: "longe" ordenado do mais perto ao mais distante e usa a menor distância do nome', () => {
+  const g = M.matchKeyList([
+    { nome: 'Longe B', distancia_m: 90000, origem, ts: 1 },
+    { nome: 'Longe A', distancia_m: 20000, origem, ts: 1 },
+    { nome: 'Longe A', distancia_m: 7000, origem: Object.assign(at(0, 50), { precisao: 10 }), ts: 2 }
+  ], portals);
+  assert.deepEqual(g.far.map(f => [f.nome, f.distancia_m]), [['Longe A', 7000], ['Longe B', 90000]]);
+});
