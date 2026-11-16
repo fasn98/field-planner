@@ -3,12 +3,12 @@
  * Rede: apenas tiles do OpenStreetMap (via Leaflet) e os próprios arquivos do app.
  * Nenhum dado sai do aparelho. GPS é somente leitura (navigator.geolocation).
  */
-/* global L, FPGeo, FPPlan */
+/* global L, FPGeo, FPPlan, FPMatch, FPRead */
 (function () {
   'use strict';
 
   var STORE = 'fieldplanner.v1';
-  var VERSION = '1.8.0';
+  var VERSION = '1.10.0';
   // nível padrão de portal novo ou importado sem nível: L1 só alcança 160 m e quase nunca fecha campo
   var DEFAULT_LEVEL = 5;
   // Qualquer string de 1–64 caracteres sem controle. A segurança contra "constructor"/"__proto__"
@@ -331,6 +331,7 @@
       pos = { lat: p.coords.latitude, lng: p.coords.longitude, accuracy: p.coords.accuracy, heading: p.coords.heading };
       setGpsChip('GPS ±' + Math.round(p.coords.accuracy) + ' m', p.coords.accuracy <= 30 ? 'ok' : 'warn');
       renderMe();
+      if (nm.sharedQueue.length) flushSharedQueue();
       if (!centeredOnce && !db.portals.length) { map.setView([pos.lat, pos.lng], 16); centeredOnce = true; }
       if (plan && !busy) {
         var why = FPPlan.autoRecalcReason(db.plan, { type: 'gps', fieldMode: fieldMode, lastPos: lastOptPos,
@@ -906,7 +907,14 @@
   }
   $('#search').addEventListener('input', renderPortalList);
 
+  var lastKeyUndo = null;
   function bumpKeys(p, d) {
+    // o desfazer restaura todos os portais: cada mudança precisa do seu ponto de volta; toques seguidos
+    // no mesmo portal (até 10 s) contam como um só, para não empurrar os links feitos para fora da pilha
+    var now = Date.now();
+    // undoPushes (não o tamanho da pilha, que fica fixo em 30 quando cheia) diz se outra ação entrou no meio
+    if (!lastKeyUndo || lastKeyUndo.id !== p.id || now - lastKeyUndo.t > 10000 || lastKeyUndo.pushes !== undoPushes) pushUndo();
+    lastKeyUndo = { id: p.id, t: now, pushes: undoPushes };
     p.chaves = clampInt(p.chaves + d, 0, 999, 0);
     save();
     renderPortals();
@@ -951,7 +959,7 @@
         nivel: f.nivel.value, chaves: f.chaves.value, observacao: f.observacao.value
       });
       if (!data) { toast('Coordenadas inválidas'); return; }
-      if (editing) Object.assign(editing, data); else db.portals.push(data);
+      if (editing) { pushUndo(); Object.assign(editing, data); } else db.portals.push(data);
       save();
       invalidatePlan();
       toast(editing ? 'Portal atualizado' : 'Portal adicionado');
@@ -1032,6 +1040,7 @@
     var data = sanitizePortal(Object.assign({}, m.p, { lat: ll.lat, lng: ll.lng }));
     if (!data) { toast('Coordenadas inválidas'); return; }
     if (data.lat === m.orig.lat && data.lng === m.orig.lng) return;
+    pushUndo();
     m.p.lat = data.lat; m.p.lng = data.lng;
     save();
     invalidatePlan();
@@ -1119,11 +1128,7 @@
   $('#clearExclBtn').addEventListener('click', function () { db.excluded = []; save(); invalidatePlan(); });
 
   $('#exportBtn').addEventListener('click', function () {
-    var data = {
-      app: 'field-planner', version: 1, exportedAt: new Date().toISOString(),
-      portals: db.portals, blockers: db.blockers, done: db.done, excluded: db.excluded, coveredManual: db.coveredManual, settings: db.settings,
-      plan: db.plan
-    };
+    var data = FPPlan.exportPayload(db); // lista fechada: chave da API e prints nunca entram
     var blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     var a = el('a', { href: URL.createObjectURL(blob), download: 'field-planner-' + new Date().toISOString().slice(0, 10) + '.json' });
     document.body.appendChild(a); a.click(); a.remove();
@@ -1157,6 +1162,7 @@
   function applyImport(data, portals) {
     var added = 0, updated = 0, kept = 0, autoN = nextPortalNumber(), addedIds = [];
     var near = nearIndex(db.portals);
+    pushUndo(); // atualizações de portais existentes pelo arquivo voltam com ↶ (os novos saem por "Desfazer última importação")
     portals.forEach(function (raw) {
       var p = sanitizePortal(raw);
       if (!p) return;
@@ -1434,12 +1440,14 @@
   });
 
   $('#wipeBtn').addEventListener('click', function () {
-    confirmDialog('Apagar tudo', 'Remove todos os portais, bloqueadores e configurações deste aparelho. Exporte antes se quiser guardar.').then(function (ok) {
+    confirmDialog('Apagar tudo', 'Remove todos os portais, bloqueadores e configurações deste aparelho, inclusive a chave da API da Anthropic, ' +
+      'as observações de prints (com as posições de onde você tirou cada um) e as preferências de "Nomear por print". Exporte antes se quiser guardar.').then(function (ok) {
       if (!ok) return;
       endMove(false);
       cancelPending(); // resposta a caminho não pode recriar um plano com portais apagados
       db = emptyDb(); plan = null; undoStack = [];
       save();
+      wipeNaming();
       setFieldMode(false);
       renderAll();
       toast('Dados apagados');
@@ -1510,12 +1518,14 @@
 
   function snapshot() {
     return JSON.stringify({ done: db.done, excluded: db.excluded, blockers: db.blockers, coveredManual: db.coveredManual,
-      keys: db.portals.map(function (p) { return [p.id, p.chaves]; }),
+      // chaves, nome, nível e posição: o desfazer cobre também o "Nomear por print"
+      portals: db.portals.map(function (p) { return [p.id, p.chaves, p.nome, p.nivel, p.lat, p.lng, p.observacao]; }),
       // plano fixado não é recalculado: o desfazer devolve também os passos que tinham saído dele,
       // mas só ao mesmo plano (gen); outro plano fixado depois disso não recebe passos de um antigo
       plan: plan ? { gen: planGen, steps: plan.steps, links: plan.links } : null });
   }
-  function pushUndo() { undoStack.push(snapshot()); if (undoStack.length > 30) undoStack.shift(); }
+  var undoPushes = 0;
+  function pushUndo() { undoPushes++; undoStack.push(snapshot()); if (undoStack.length > 30) undoStack.shift(); }
 
   // Remove o link atual do plano local para a UI responder na hora; o recálculo substitui depois.
   function advanceLocal() {
@@ -1590,23 +1600,576 @@
     var last = db.blockers[db.blockers.length - 1];
     var snap = JSON.parse(snapshot());
     snap.blockers = snap.blockers.filter(function (b) { return b !== last && b.id !== last.id; });
+    undoPushes++;
     undoStack.push(JSON.stringify(snap));
   }
 
-  $('#fUndo').addEventListener('click', function () {
+  function undoLast() {
     var s = undoStack.pop();
     if (!s) { toast('Nada para desfazer'); return; }
     var snap = JSON.parse(s);
     db.done = snap.done; db.excluded = snap.excluded; db.blockers = snap.blockers; db.coveredManual = snap.coveredManual;
-    snap.keys.forEach(function (kv) { var p = portalById(kv[0]); if (p) p.chaves = kv[1]; });
+    snap.portals.forEach(function (v) {
+      var p = portalById(v[0]);
+      if (p) { p.chaves = v[1]; p.nome = v[2]; p.nivel = v[3]; p.lat = v[4]; p.lng = v[5]; p.observacao = v[6]; }
+    });
     if (snap.plan && isPinned() && snap.plan.gen === planGen) { plan.steps = snap.plan.steps; plan.links = snap.plan.links; }
     else if (isPinned()) toast('Desfeito nos dados; o plano fixado é outro e não foi alterado', 4000);
     save();
     autoOptimize('desfeito');
     renderAll();
-  });
+    if (typeof refreshSuggestions === 'function') { refreshSuggestions(); renderNameBox(); }
+  }
+  $('#fUndo').addEventListener('click', undoLast);
   $('#fRecalc').addEventListener('click', function () { manualOptimize('recalculado manualmente'); });
   $('#fExit').addEventListener('click', function () { setFieldMode(false); });
+
+  /* ------------------------------------------------------------ */
+  /* Nomear por print (Ajustes). Desligado por padrão.             */
+  /* Imagens ficam só na memória desta tela; a leitura usa a API   */
+  /* da Anthropic com a chave do usuário; o casamento é local      */
+  /* (matching.js) e nada muda sem confirmação.                    */
+  /* ------------------------------------------------------------ */
+
+  var OBS_STORE = 'fieldplanner.v1.obs'; // observações de listas de chaves, só neste aparelho
+  var MAX_IMG_SIDE = 1568;               // a API reduz imagens maiores; mandamos já reduzida
+  var GPS_WARN_ACC = 25;
+  var prefs = FPRead.loadPrefs(localStorage);
+  var nm = { items: [], mapSugs: [], singles: [], busy: false, origin: null, manualOrigin: '', editing: null, sharedQueue: [], skipped: Object.create(null), gen: 0, hashes: Object.create(null), doneRegistered: Object.create(null) };
+
+  function loadObs() {
+    try { var a = JSON.parse(localStorage.getItem(OBS_STORE) || '[]'); return Array.isArray(a) ? a.filter(function (o) { return o && o.nome && o.origem; }) : []; }
+    catch (e) { return []; }
+  }
+  function saveObs(list) {
+    try { localStorage.setItem(OBS_STORE, JSON.stringify(list.slice(-2000))); } catch (e) { toastError('Não foi possível salvar as observações'); }
+  }
+  var observations = loadObs();
+
+  /** Posição do print = GPS no momento em que a imagem chega ao app (ou digitada). */
+  function captureOrigin() {
+    var typed = FPGeo.parseCoords(nm.manualOrigin);
+    if (typed) return Promise.resolve({ lat: typed.lat, lng: typed.lng, precisao: 10, manual: true });
+    if (!pos) return Promise.resolve(null);
+    var o = { lat: pos.lat, lng: pos.lng, precisao: Math.round(pos.accuracy || 0) };
+    if (o.precisao <= GPS_WARN_ACC) return Promise.resolve(o);
+    return confirmDialog('GPS impreciso', 'A precisão do GPS agora é de ±' + o.precisao + ' m (acima de ' + GPS_WARN_ACC + ' m). ' +
+      'As distâncias da lista de chaves ficam menos confiáveis. Usar mesmo assim?').then(function (ok) { return ok ? o : null; });
+  }
+
+  /** Reduz a imagem (lado maior ≤ 1568 px) e devolve { b64, dataUrl, w, h } só em memória. */
+  function prepImage(file) {
+    return new Promise(function (resolve, reject) {
+      var url = URL.createObjectURL(file), img = new Image();
+      img.onload = function () {
+        var k = Math.min(1, MAX_IMG_SIDE / Math.max(img.naturalWidth, img.naturalHeight));
+        var w = Math.round(img.naturalWidth * k), h = Math.round(img.naturalHeight * k);
+        var c = document.createElement('canvas'); c.width = w; c.height = h;
+        c.getContext('2d').drawImage(img, 0, 0, w, h);
+        URL.revokeObjectURL(url);
+        var dataUrl = c.toDataURL('image/jpeg', 0.85);
+        resolve({ b64: dataUrl.slice(dataUrl.indexOf(',') + 1), dataUrl: dataUrl, w: w, h: h });
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); reject(new Error('imagem ilegível')); };
+      img.src = url;
+    });
+  }
+
+  function processFiles(files) {
+    files = Array.prototype.filter.call(files || [], function (f) { return /^image\//.test(f.type) || /\.(png|jpe?g|webp|gif)$/i.test(f.name); });
+    if (!files.length) return;
+    var key = FPRead.loadKey(localStorage);
+    if (!prefs.enabled || !key) { toast('Ligue "Nomear por print" e salve a chave da API em Ajustes'); return; }
+    var fresh;
+    Promise.all(files.slice(0, 20).map(fileHash)).then(function (hashes) {
+      // mesma imagem (mesmo conteúdo) já lida nesta sessão: ignorada, para não ler nem listar de novo
+      var batch = Object.create(null);
+      fresh = files.slice(0, 20).filter(function (f, i) {
+        if (nm.hashes[hashes[i]] || batch[hashes[i]]) return false;
+        batch[hashes[i]] = true; f._fpHash = hashes[i]; return true; // marcado como lido só se a leitura der certo
+      });
+      var rep = Math.min(files.length, 20) - fresh.length;
+      if (rep) toast(rep + ' imagem(ns) já lida(s) ignorada(s)', 4000);
+      if (files.length > 20) toast('Máximo de 20 imagens por vez; o resto foi ignorado', 4000);
+      return fresh.length ? captureOrigin() : null;
+    }).then(function (origin) {
+      if (!fresh.length) return;
+      nm.origin = origin;
+      var items = fresh.map(function (f) { return { name: f.name || 'print', status: 'na fila', file: f, origin: origin, hash: f._fpHash }; });
+      nm.items = nm.items.concat(items);
+      renderNameBox();
+      // uma de cada vez: o progresso aparece por imagem e o limite da API sofre menos
+      var gen = nm.gen;
+      return items.reduce(function (chain, it) { return chain.then(function () { return readOne(it, key, gen); }); }, Promise.resolve());
+    }).then(function () { refreshSuggestions(); renderNameBox(); });
+  }
+
+  /** SHA-256 do conteúdo (contexto seguro); sem crypto.subtle, nome + tamanho + data. */
+  function fileHash(f) {
+    var weak = 'w:' + f.name + ':' + f.size + ':' + f.lastModified;
+    if (!(window.crypto && crypto.subtle && f.arrayBuffer)) return Promise.resolve(weak);
+    return f.arrayBuffer().then(function (buf) { return crypto.subtle.digest('SHA-256', buf); }).then(function (d) {
+      return Array.prototype.map.call(new Uint8Array(d), function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
+    }).catch(function () { return weak; });
+  }
+
+  /** A fila ainda vale? "Apagar tudo" e "Desligar" mudam nm.gen; a chave também precisa continuar salva. */
+  function stillValid(gen, key) { return gen === nm.gen && prefs.enabled && FPRead.loadKey(localStorage) === key; }
+  function readOne(it, key, gen) {
+    if (!stillValid(gen, key)) { it.file = null; return Promise.resolve(); }
+    it.status = 'preparando…'; renderNameBox();
+    return prepImage(it.file).then(function (im) {
+      it.file = null; // a imagem original sai da memória; fica só a miniatura reduzida
+      if (!stillValid(gen, key)) return { ok: false, cancelled: true };
+      it.thumb = im.dataUrl; it.w = im.w; it.h = im.h;
+      it.status = 'lendo com a IA…'; renderNameBox();
+      return FPRead.readImage(fetch.bind(window), key, prefs.model, im.b64, 'image/jpeg');
+    }).then(function (r) {
+      if (r.cancelled || !stillValid(gen, key)) return; // apagado ou desligado no meio: nada é gravado
+      if (!r.ok) { it.status = '⚠ ' + r.error; it.error = true; renderNameBox(); return; }
+      it.reading = r.value;
+      if (it.hash) nm.hashes[it.hash] = true; // erro, 429 ou cancelamento: o mesmo print pode ser reenviado
+      applyReading(it);
+      renderNameBox();
+    }).catch(function (e) { it.status = '⚠ ' + (e && e.message || 'falha'); it.error = true; renderNameBox(); });
+  }
+
+  /** Leitura validada → observações (lista de chaves), sugestões de mapa ou portal único. Nada é gravado em portal. */
+  function applyReading(it) {
+    var rd = it.reading, n = rd.portais.length;
+    if (rd.tipo === 'lista_chaves') {
+      if (!it.origin) { it.status = '⚠ lista de chaves sem posição: informe a posição do print e envie de novo'; it.error = true; return; }
+      var ts = Date.now(), added = 0, dup = 0;
+      rd.portais.forEach(function (p) {
+        if (p.distancia_m == null) return;
+        var o = { nome: p.nome, endereco: p.endereco, distancia_m: p.distancia_m, nivel: p.nivel, chaves: p.chaves,
+          origem: { lat: it.origin.lat, lng: it.origin.lng, precisao: it.origin.precisao }, ts: ts };
+        // mesmo nome, mesma distância, origem a < 5 m: o mesmo dado de outro print (ou do mesmo print reenviado)
+        if (observations.some(function (x) { return FPMatch.isDuplicateObs(x, o); })) { dup++; return; }
+        observations.push(o);
+        added++;
+      });
+      saveObs(observations);
+      it.status = '✓ lista de chaves: ' + added + ' nova(s) de ' + n + (dup ? ' (' + dup + ' repetida(s))' : '');
+    } else if (rd.tipo === 'mapa') {
+      var r = FPMatch.matchMap(rd, db.portals);
+      if (!r.ok) { it.status = '⚠ mapa: ' + r.reason; it.error = true; return; }
+      r.matches.forEach(function (m) {
+        var p = portalById(m.portal), pt = rd.portais[m.idx];
+        if (!p || FPMatch.nameSimilarity(p.nome, pt.nome) >= FPMatch.SAME_NAME) return; // já tem esse nome
+        if (!FPMatch.isProvisional(p.nome)) return; // só renomeia provisórios
+        var taken = FPMatch.sameNamePortal(pt.nome, db.portals, m.portal);
+        nm.mapSugs.push({ src: 'mapa', item: it, nome: pt.nome, portal: m.portal, confidence: m.confidence, dist: m.dist,
+          keys: pt.chaves, nivel: pt.nivel, px: { x: pt.x, y: pt.y }, nameTakenBy: taken ? taken.id : null });
+      });
+      it.status = '✓ mapa: ' + r.inliers + ' de ' + n + ' pontos casados' + (r.ambiguous ? ' (alinhamento ambíguo: confira um a um)' : '');
+    } else {
+      var s = FPMatch.matchSingle(rd, db.portals, it.origin);
+      if (!s.ok) { it.status = '⚠ portal único: nenhum candidato'; it.error = true; return; }
+      var p0 = rd.portais[0];
+      nm.singles.push({ src: 'unico', item: it, nome: p0.nome, candidates: s.candidates.map(function (c) { return c.portal; }), keys: p0.chaves, nivel: p0.nivel });
+      it.status = '✓ portal único: ' + s.candidates.length + ' candidato(s), confirme abaixo';
+    }
+  }
+
+  var keySugs = [], keyPending = [], keyRegistered = [];
+  function refreshSuggestions() {
+    var r = FPMatch.matchKeyList(observations, db.portals);
+    keySugs = r.suggestions.filter(function (s) { return !nm.skipped[s.key + '\u0000' + s.portal]; })
+      .map(function (s) { return Object.assign({ src: 'lista', dist: null }, s); });
+    keyPending = r.pending;
+    keyRegistered = r.registered;
+    // mapa: descarta sugestões cujo portal já foi renomeado ou excluído
+    nm.mapSugs = nm.mapSugs.filter(function (s) { var p = portalById(s.portal); return p && FPMatch.isProvisional(p.nome); });
+    nm.mapSugs.forEach(function (s) { var t = FPMatch.sameNamePortal(s.nome, db.portals, s.portal); s.nameTakenBy = t ? t.id : null; });
+  }
+  /** Sugestões em conflito: o mesmo portal com nomes diferentes, ou o mesmo nome em portais diferentes (mapa × lista, mapa × mapa). */
+  function sugConflicts(sugs) {
+    var out = new Set();
+    // nome que já pertence a outro portal do app (mesma identidade de nome)
+    sugs.forEach(function (s) { if (s.nameTakenBy || FPMatch.sameNamePortal(s.nome, db.portals, s.portal)) out.add(s); });
+    // mesmo portal com nomes diferentes (nome inteiro: "Mural 1" e "Mural 2" são diferentes)
+    var byP = Object.create(null);
+    sugs.forEach(function (s) { (byP[s.portal] = byP[s.portal] || []).push(s); });
+    Object.keys(byP).forEach(function (k) {
+      var g = byP[k];
+      if (new Set(g.map(function (s) { return FPMatch.normName(s.nome); })).size > 1) g.forEach(function (s) { out.add(s); });
+    });
+    // mesmo nome (por similaridade: "Manhathan" ≈ "Manhattan") em portais diferentes
+    sugs.forEach(function (s, i) {
+      sugs.forEach(function (t, j) {
+        if (j > i && s.portal !== t.portal && (FPMatch.normName(s.nome) === FPMatch.normName(t.nome) || FPMatch.nameSimilarity(s.nome, t.nome) >= FPMatch.SAME_NAME)) { out.add(s); out.add(t); }
+      });
+    });
+    return out;
+  }
+  function allSugs() {
+    return keySugs.concat(nm.mapSugs).sort(function (a, b) { return b.confidence - a.confidence; });
+  }
+
+  /** Aplica um nome confirmado. opts: { keys, nivel, move } (todos desmarcados por padrão). */
+  function acceptName(portalId, nome, sug, opts) {
+    var p = portalById(portalId);
+    var clean = String(nome || '').trim().slice(0, 80);
+    if (!p || !clean) { toast('Nada a aplicar'); return Promise.resolve(false); }
+    var dup = FPMatch.sameNamePortal(clean, db.portals, p.id);
+    if (dup) { // nome único: dois portais nunca ficam com o mesmo nome
+      toastError('“' + clean + '” já é o portal “' + dup.nome + '”. Use “É este” para atualizar aquele portal.');
+      return Promise.resolve(false);
+    }
+    return acceptNameNow(p, clean, sug, opts);
+  }
+  function acceptNameNow(p, clean, sug, opts) {
+    var moveTo = opts && opts.move && sug && sug.estimate ? sug.estimate : null;
+    var ask = moveTo ? confirmDialog('Ajustar posição', 'Mover “' + p.nome + '” ' + fmtDist(FPGeo.haversine(p, moveTo)) +
+      ' para a posição estimada pelos prints (resíduo ' + moveTo.residual + ' m)?') : Promise.resolve(false);
+    return ask.then(function (doMove) {
+      pushUndo();
+      var geom = false;
+      p.nome = clean;
+      if (opts && opts.keys && sug && sug.keys != null) { p.chaves = clampInt(sug.keys, 0, 999, p.chaves); geom = true; }
+      if (opts && opts.nivel && sug && sug.nivel != null) { p.nivel = clampInt(sug.nivel, 1, 8, p.nivel); geom = true; }
+      if (doMove) { p.lat = moveTo.lat; p.lng = moveTo.lng; geom = true; }
+      save();
+      // renomear não mexe no plano; chaves, nível e posição passam pelo caminho de sempre
+      // (plano fixado não recalcula; mover > 30 m aparece no aviso de validação)
+      if (geom) invalidatePlan(); else renderAll();
+      refreshSuggestions();
+      renderNameBox();
+      return true;
+    });
+  }
+
+  /** "✓ já cadastrado" / "É este": nunca renomeia; só chaves, nível e (com confirmação) posição, se marcados. */
+  function updateExisting(portalId, s, opts) {
+    var p = portalById(portalId);
+    if (!p) return Promise.resolve(false);
+    opts = opts || {};
+    if (!opts.keys && !opts.nivel && !opts.move) {
+      if (s.src === 'mapa' || s.src === 'lista') skipSug(s);
+      toast('“' + p.nome + '” já está cadastrado: nada a mudar');
+      return Promise.resolve(false);
+    }
+    var moveTo = opts.move && s.estimate ? s.estimate : null;
+    var ask = moveTo ? confirmDialog('Ajustar posição', 'Mover “' + p.nome + '” ' + fmtDist(FPGeo.haversine(p, moveTo)) +
+      ' para a posição estimada pelos prints (resíduo ' + moveTo.residual + ' m)?') : Promise.resolve(false);
+    return ask.then(function (doMove) {
+      pushUndo();
+      if (opts.keys && s.keys != null) p.chaves = clampInt(s.keys, 0, 999, p.chaves);
+      if (opts.nivel && s.nivel != null) p.nivel = clampInt(s.nivel, 1, 8, p.nivel);
+      if (doMove) { p.lat = moveTo.lat; p.lng = moveTo.lng; }
+      save();
+      invalidatePlan();
+      if (s.src === 'mapa' || s.src === 'lista') skipSug(s);
+      if (s.key) nm.doneRegistered[s.key] = true;
+      refreshSuggestions();
+      renderNameBox();
+      toast('“' + p.nome + '” atualizado');
+      return true;
+    });
+  }
+
+  function registeredRow(g) {
+    var p = portalById(g.portal);
+    if (!p) return null;
+    var optKeys = el('input', { type: 'checkbox' }), optLv = el('input', { type: 'checkbox' }), optMove = el('input', { type: 'checkbox' });
+    var opts = el('div', { class: 'nm-opts small' });
+    if (g.keys != null && g.keys !== p.chaves) opts.appendChild(el('label', null, [optKeys, ' atualizar chaves (' + p.chaves + ' → ' + g.keys + ')']));
+    if (g.nivel != null && g.nivel !== p.nivel) opts.appendChild(el('label', null, [optLv, ' atualizar nível (L' + p.nivel + ' → L' + g.nivel + ')']));
+    if (g.estimate) opts.appendChild(el('label', null, [optMove, ' ajustar posição para a estimada (desloca ' + fmtDist(g.estimate.shift) + ')']));
+    var li = el('li', null, [
+      el('div', null, [el('b', { text: '✓ ' + g.nome }), el('span', { class: 'muted small', text: ' já cadastrado como “' + p.nome + '”' })]),
+      el('div', { class: 'muted small', text: g.obs + ' observação(ões) · diferença de ' + g.delta + ' m entre a distância do print e a posição do app' })
+    ]);
+    if (opts.childNodes.length) {
+      li.appendChild(opts);
+      li.appendChild(el('div', { class: 'row' }, [el('button', { class: 'btn sm', text: 'Atualizar marcados', onclick: function () {
+        updateExisting(g.portal, Object.assign({ src: 'cadastrado' }, g), { keys: optKeys.checked, nivel: optLv.checked, move: optMove.checked });
+      } })]));
+    }
+    return li;
+  }
+
+  function skipSug(s) {
+    if (s.src === 'mapa') nm.mapSugs = nm.mapSugs.filter(function (x) { return x !== s; });
+    else if (s.src === 'unico') nm.singles = nm.singles.filter(function (x) { return x !== s; });
+    else { keySugs = keySugs.filter(function (x) { return x !== s; }); nm.skipped[s.key + '\u0000' + s.portal] = true; }
+    renderNameBox();
+  }
+
+  /** Miniatura do print com o ponto marcado (só para print de mapa). */
+  function thumbEl(s) {
+    if (!s.item || !s.item.thumb) return null;
+    var c = document.createElement('canvas'), W = 96, k = W / s.item.w;
+    c.width = W; c.height = Math.round(s.item.h * k); c.className = 'nm-thumb';
+    var img = new Image();
+    img.onload = function () {
+      var g = c.getContext('2d');
+      g.drawImage(img, 0, 0, c.width, c.height);
+      if (s.px) { g.strokeStyle = '#ff2d55'; g.lineWidth = 3; g.beginPath(); g.arc(s.px.x * k, s.px.y * k, 7, 0, 2 * Math.PI); g.stroke(); }
+    };
+    img.src = s.item.thumb;
+    return c;
+  }
+
+  function candidateList(nearId) {
+    var ref = nearId ? portalById(nearId) : null;
+    var list = db.portals.filter(function (p) { return FPMatch.isProvisional(p.nome) || p.id === nearId; });
+    if (ref) list.sort(function (a, b) { return FPGeo.haversine(ref, a) - FPGeo.haversine(ref, b); });
+    return list.slice(0, 15);
+  }
+
+  function sugRow(s, conflict) {
+    var p = portalById(s.portal);
+    var taken = s.nameTakenBy ? portalById(s.nameTakenBy) : FPMatch.sameNamePortal(s.nome, db.portals, s.portal);
+    var tgt = taken || p; // com o nome já cadastrado, as caixas valem para "É este" (o portal cadastrado)
+    var optKeys = el('input', { type: 'checkbox' }), optLv = el('input', { type: 'checkbox' }), optMove = el('input', { type: 'checkbox' });
+    var opts = el('div', { class: 'nm-opts small' });
+    if (s.keys != null) opts.appendChild(el('label', null, [optKeys, ' atualizar chaves (' + (tgt ? tgt.chaves : '?') + ' → ' + s.keys + ')']));
+    if (s.nivel != null) opts.appendChild(el('label', null, [optLv, ' atualizar nível (L' + (tgt ? tgt.nivel : '?') + ' → L' + s.nivel + ')']));
+    if (s.estimate) opts.appendChild(el('label', null, [optMove, ' ajustar posição para a estimada (desloca ' +
+      fmtDist(tgt ? FPGeo.haversine(tgt, s.estimate) : s.estimate.shift) + ')']));
+    var detail = (s.src === 'mapa' ? 'print de mapa · ponto a ' + s.dist + ' m do portal'
+      : 'lista de chaves · ' + s.obs + ' observação(ões) de ' + s.origins + ' ponto(s)') + ' · confiança ' + Math.round(s.confidence * 100) + '%';
+    var getOpts = function () { return { keys: optKeys.checked, nivel: optLv.checked, move: optMove.checked }; };
+    var accept = el('button', { class: 'btn sm ok', text: '✅ Aceitar', onclick: function () { acceptName(s.portal, s.nome, s, getOpts()); } });
+    accept.disabled = !!taken; // nome único: o nome já é de outro portal
+    var li = el('li', { class: 'nm-sug' }, [
+      thumbEl(s),
+      el('div', { class: 'grow' }, [
+        el('div', null, [el('span', { class: 'muted', text: (p ? p.nome : '(removido)') + ' → ' }), el('b', { text: s.nome })]),
+        el('div', { class: 'muted small', text: detail }),
+        taken ? el('div', { class: 'small nm-conflict', text: '⚠ “' + s.nome + '” já é o portal “' + taken.nome + '”' +
+          (FPGeo.haversine(taken, p || taken) >= 1 ? ' (a ' + fmtDist(FPGeo.haversine(taken, p || taken)) + ' deste)' : '') + '. Renomear criaria dois portais com o mesmo nome.' }) : null,
+        !taken && conflict ? el('div', { class: 'small nm-conflict', text: '⚠ conflito: outra sugestão usa este portal ou este nome. Fica fora do "aceitar todos"; decida um a um.' }) : null,
+        opts,
+        el('div', { class: 'row' }, [
+          accept,
+          taken ? el('button', { class: 'btn sm', text: 'É este: ' + taken.nome, onclick: function () { updateExisting(taken.id, s, getOpts()); } }) : null,
+          el('button', { class: 'btn sm', text: '✏️ Corrigir', onclick: function () { nm.editing = s; renderNameBox(); } }),
+          el('button', { class: 'btn sm ghost', text: '⏭️ Pular', onclick: function () { skipSug(s); } })
+        ])
+      ])
+    ]);
+    if (nm.editing === s) li.appendChild(editBox(s, getOpts));
+    return li;
+  }
+
+  function editBox(s, getOpts) {
+    var name = el('input', { type: 'text', maxlength: '80', 'aria-label': 'Nome correto' });
+    name.value = s.nome;
+    var sel = el('select', { 'aria-label': 'Portal' });
+    var ids = s.candidates && s.candidates.length ? s.candidates.map(portalById).filter(Boolean) : candidateList(s.portal);
+    ids.forEach(function (p) {
+      var o = el('option', { value: p.id, text: p.nome + (s.portal && p.id !== s.portal && portalById(s.portal) ? ' · ' + fmtDist(FPGeo.haversine(portalById(s.portal), p)) : '') });
+      if (p.id === s.portal) o.selected = true;
+      sel.appendChild(o);
+    });
+    return el('div', { class: 'stack nm-edit' }, [
+      el('label', { class: 'f' }, ['Nome', name]),
+      el('label', { class: 'f' }, ['Portal do app', sel]),
+      el('div', { class: 'row' }, [
+        el('button', { class: 'btn sm ok', text: 'Salvar correção', onclick: function () {
+          nm.editing = null;
+          acceptName(sel.value, name.value, sel.value === s.portal ? s : Object.assign({}, s, { estimate: null }), getOpts ? getOpts() : {});
+        } }),
+        el('button', { class: 'btn sm ghost', text: 'Cancelar', onclick: function () { nm.editing = null; renderNameBox(); } })
+      ])
+    ]);
+  }
+
+  function pendingRow(pd, origin) {
+    var li = el('li', null, [
+      el('div', null, [el('b', { text: pd.nome }), el('span', { class: 'muted small', text: ' · ' + pd.obs + ' observação(ões) de ' + pd.origins + ' ponto(s)' })]),
+      el('div', { class: 'muted small', text: pd.hint })
+    ]);
+    // empate: o jogador decide qual é (o app nunca escolhe sozinho)
+    var row = el('div', { class: 'row' });
+    pd.candidates.slice(0, 6).forEach(function (id) {
+      var p = portalById(id);
+      if (!p) return;
+      row.appendChild(el('button', { class: 'btn sm', text: 'É este: ' + p.nome + (origin ? ' · ' + fmtDist(FPGeo.haversine(origin, p)) : ''),
+        onclick: function () {
+          confirmDialog('Confirmar nome', 'Renomear “' + p.nome + '” para “' + pd.nome + '”?').then(function (ok) { if (ok) acceptName(id, pd.nome, null, {}); });
+        } }));
+    });
+    if (row.childNodes.length) li.appendChild(row);
+    return li;
+  }
+
+  function renderNameBox() {
+    var box = $('#nameBox');
+    if (!box) return;
+    box.textContent = '';
+    var key = FPRead.loadKey(localStorage);
+    if (!prefs.enabled) {
+      box.appendChild(el('p', { class: 'muted small', text: 'Troca nomes provisórios (BK 001, Portal 07…) pelos nomes reais a partir dos seus screenshots do jogo, com confirmação um a um. ' +
+        'Desligado: nenhuma imagem sai do aparelho.' }));
+      box.appendChild(el('div', { class: 'row' }, [el('button', { class: 'btn grow', text: 'Ligar Nomear por print', onclick: function () {
+        confirmDialog('Nomear por print', 'As imagens selecionadas são enviadas à API da Anthropic. Nenhum serviço da Niantic é acessado. ' +
+          'A leitura usa a sua chave da API e é cobrada na sua conta Anthropic. Os prints não ficam guardados no aparelho. Ligar?').then(function (ok) {
+          if (!ok) return;
+          prefs.enabled = true; FPRead.savePrefs(localStorage, prefs); renderNameBox();
+        });
+      } })]));
+      return;
+    }
+    // chave da API
+    if (key) {
+      box.appendChild(el('div', { class: 'row' }, [
+        el('span', { class: 'grow small', text: '🔑 Chave da API: ' + FPRead.maskKey(key) }),
+        el('button', { class: 'btn sm bad', text: 'Apagar chave', onclick: function () { FPRead.clearKey(localStorage); renderNameBox(); toast('Chave apagada deste aparelho'); } })
+      ]));
+    } else {
+      var kin = el('input', { type: 'password', autocomplete: 'off', placeholder: 'sk-ant-…', 'aria-label': 'Chave da API da Anthropic' });
+      box.appendChild(el('p', { class: 'muted small', text: 'Sem chave da API o recurso fica desabilitado. Crie uma chave no console da Anthropic e cole aqui. ' +
+        'Ela fica só neste aparelho (não entra no JSON exportado).' }));
+      box.appendChild(el('div', { class: 'row' }, [kin, el('button', { class: 'btn sm', text: 'Salvar chave', onclick: function () {
+        var v = kin.value.trim();
+        if (!/^sk-ant-[A-Za-z0-9_\-]{10,}$/.test(v)) { toast('Isso não parece uma chave da API da Anthropic'); return; }
+        FPRead.saveKey(localStorage, v); kin.value = ''; renderNameBox();
+      } })]));
+    }
+    var model = el('input', { type: 'text', value: prefs.model, 'aria-label': 'Modelo', maxlength: '60' });
+    model.addEventListener('change', function () {
+      var v = model.value.trim();
+      if (/^[a-z0-9.\-]{3,60}$/.test(v)) { prefs.model = v; FPRead.savePrefs(localStorage, prefs); } else { model.value = prefs.model; toast('Nome de modelo inválido'); }
+    });
+    var pct = el('input', { type: 'number', min: '80', max: '100', value: String(prefs.autoPct), 'aria-label': 'Aceitar todos acima de (%)' });
+    pct.addEventListener('change', function () { prefs.autoPct = clampInt(pct.value, 80, 100, 80); pct.value = prefs.autoPct; FPRead.savePrefs(localStorage, prefs); renderNameBox(); });
+    box.appendChild(el('div', { class: 'row small' }, [el('label', { class: 'grow' }, ['Modelo ', model])]));
+    // posição do print
+    var gpsTxt = pos ? 'GPS agora: ±' + Math.round(pos.accuracy || 0) + ' m' + ((pos.accuracy || 0) > GPS_WARN_ACC ? ' (impreciso)' : '') : 'sem GPS';
+    var oin = el('input', { type: 'text', placeholder: 'ou digite: -23.5505, -46.6333', 'aria-label': 'Posição do print', value: nm.manualOrigin });
+    oin.addEventListener('change', function () { nm.manualOrigin = oin.value; flushSharedQueue(); });
+    box.appendChild(el('p', { class: 'muted small', text: 'Lista de chaves: tire o print e mande para cá parado no mesmo lugar. O app grava a posição do GPS quando a imagem chega (' + gpsTxt + ').' }));
+    box.appendChild(el('div', { class: 'row' }, [oin]));
+    var pick = el('button', { class: 'btn primary grow', text: '📷 Escolher prints', onclick: function () { $('#printFiles').click(); } });
+    pick.disabled = !key;
+    box.appendChild(el('div', { class: 'row' }, [pick]));
+    // progresso
+    if (nm.items.length) {
+      var ul = el('ul', { class: 'list' });
+      nm.items.forEach(function (it) { ul.appendChild(el('li', { class: 'small' + (it.error ? ' bad' : '') }, [el('b', { text: it.name }), ' · ' + it.status])); });
+      box.appendChild(ul);
+      box.appendChild(el('div', { class: 'row' }, [el('button', { class: 'btn sm ghost', text: 'Limpar imagens desta tela', onclick: function () {
+        nm.items = []; nm.mapSugs = []; nm.singles = []; nm.hashes = Object.create(null); renderNameBox();
+      } })]));
+    }
+    // sugestões
+    var sugs = allSugs();
+    if (sugs.length) {
+      box.appendChild(el('h4', { text: 'Sugestões (' + sugs.length + ')' }));
+      var conflicts = sugConflicts(sugs);
+      // lote: só acima do limite (nunca abaixo do mínimo de auto-aceite) e sem conflito de portal ou de nome
+      var high = sugs.filter(function (s) { return s.confidence >= FPMatch.AUTO_ACCEPT && s.confidence * 100 >= prefs.autoPct && !conflicts.has(s); });
+      var allBtn = el('button', { class: 'btn sm', text: 'Aceitar todos acima de ' + prefs.autoPct + '% (' + high.length + ')', onclick: function () {
+          if (!high.length) return;
+          confirmDialog('Aceitar vários', 'Renomear ' + high.length + ' portal(is) só com o nome (sem mudar chaves, nível ou posição)?').then(function (ok) {
+            if (!ok) return;
+            pushUndo(); // um único desfazer para o lote
+            high.forEach(function (s) { var p = portalById(s.portal); if (p) p.nome = String(s.nome).slice(0, 80); });
+            save(); renderAll(); refreshSuggestions(); renderNameBox();
+            toast(high.length + ' portal(is) renomeado(s). ↶ Desfazer volta todos.', 4000);
+          });
+        } });
+      allBtn.disabled = !high.length;
+      box.appendChild(el('div', { class: 'row small' }, [allBtn, el('label', null, [' limite ', pct, '%'])]));
+      var sl = el('ul', { class: 'list' });
+      sugs.forEach(function (s) { sl.appendChild(sugRow(s, conflicts.has(s))); });
+      box.appendChild(sl);
+    }
+    // já cadastrados: o nome bate com um portal do app; só atualizar chaves/nível/posição, nunca renomear
+    var regs = keyRegistered.filter(function (g) { return !nm.doneRegistered[g.key]; });
+    if (regs.length) {
+      box.appendChild(el('h4', { text: '✓ Já cadastrados (' + regs.length + ')' }));
+      var rl = el('ul', { class: 'list' });
+      regs.forEach(function (g) { var row = registeredRow(g); if (row) rl.appendChild(row); });
+      box.appendChild(rl);
+    }
+    // portal único e pendentes: confirmação obrigatória
+    if (nm.singles.length || keyPending.length) {
+      box.appendChild(el('h4', { text: 'Pendentes (' + (nm.singles.length + keyPending.length) + ')' }));
+      var pl = el('ul', { class: 'list' });
+      nm.singles.forEach(function (s) {
+        pl.appendChild(pendingRow({ nome: s.nome, obs: 1, origins: 1, candidates: s.candidates, hint: 'print de um portal: escolha qual é' }, s.item.origin));
+      });
+      var lastOrigin = observations.length ? observations[observations.length - 1].origem : null;
+      keyPending.forEach(function (pd) { pl.appendChild(pendingRow(pd, lastOrigin)); });
+      box.appendChild(pl);
+    }
+    box.appendChild(el('div', { class: 'row' }, [
+      el('button', { class: 'btn sm', text: '↶ Desfazer', onclick: undoLast }),
+      el('button', { class: 'btn sm ghost', text: 'Esquecer observações (' + observations.length + ')', onclick: function () {
+        confirmDialog('Esquecer observações', 'Apagar as ' + observations.length + ' distâncias lidas de listas de chaves? Os nomes já aceitos ficam.').then(function (ok) {
+          if (!ok) return;
+          nm.gen++; // leitura de lista em andamento não regrava o que acabou de ser esquecido
+          nm.hashes = Object.create(null); nm.doneRegistered = Object.create(null); // os mesmos prints podem ser lidos de novo
+          observations = []; saveObs(observations); refreshSuggestions(); renderNameBox();
+        });
+      } }),
+      el('button', { class: 'btn sm ghost', text: 'Desligar', onclick: function () {
+        prefs.enabled = false; FPRead.savePrefs(localStorage, prefs); nm.gen++; nm.items = []; nm.mapSugs = []; nm.singles = [];
+        nm.hashes = Object.create(null); renderNameBox();
+      } })
+    ]));
+  }
+
+  $('#printFiles').addEventListener('change', function (e) {
+    var files = Array.prototype.slice.call(e.target.files || []);
+    e.target.value = '';
+    processFiles(files);
+  });
+
+  // Prints compartilhados pelo Android (Web Share Target): o service worker guarda por instantes e o app
+  // apaga assim que lê. A posição é a do GPS no recebimento.
+  function takeSharedPrints() {
+    if (!('caches' in window)) return;
+    // abriu sem o parâmetro (redirect perdido, aba fechada): nada fica esquecido no cache
+    if (!/[?&]compartilhado=1/.test(location.search)) { caches.delete('share-inbox').catch(function () {}); return; }
+    history.replaceState(null, '', location.pathname);
+    caches.open('share-inbox').then(function (c) {
+      return c.keys().then(function (reqs) {
+        return Promise.all(reqs.map(function (rq) {
+          return c.match(rq).then(function (res) {
+            return res.blob().then(function (b) {
+              c.delete(rq);
+              return new File([b], decodeURIComponent(rq.url.split('/').pop()) || 'print', { type: b.type || 'image/jpeg' });
+            });
+          });
+        }));
+      });
+    }).then(function (files) {
+      if (!files.length) return;
+      if (!prefs.enabled || !FPRead.loadKey(localStorage)) {
+        toast('Print recebido e descartado: ligue "Nomear por print" e salve a chave em Ajustes', 6000);
+        return;
+      }
+      document.querySelector('.tabs button[data-tab="ajustes"]').click();
+      if (pos || FPGeo.parseCoords(nm.manualOrigin)) { processFiles(files); return; }
+      nm.sharedQueue = files; // espera o primeiro GPS (ou a posição digitada)
+      toast('Print recebido: aguardando o GPS para gravar a posição', 5000);
+    }).catch(function (e) { console.warn('[FP] prints compartilhados', e && e.message); });
+  }
+  /** "Apagar tudo": chave, preferências, observações, imagens desta tela e o cache de compartilhados. */
+  function wipeNaming() {
+    FPRead.clearKey(localStorage);
+    try { localStorage.removeItem(FPRead.PREFS_STORE); localStorage.removeItem(OBS_STORE); } catch (e) { /* nada a apagar */ }
+    if ('caches' in window) caches.delete('share-inbox').catch(function () {});
+    prefs = FPRead.loadPrefs(localStorage);
+    observations = [];
+    nm.gen++; // leituras em andamento param e não gravam nada
+    nm.items = []; nm.mapSugs = []; nm.singles = []; nm.sharedQueue = []; nm.editing = null; nm.skipped = Object.create(null);
+    nm.hashes = Object.create(null); nm.doneRegistered = Object.create(null);
+    nm.manualOrigin = '';
+    refreshSuggestions();
+    renderNameBox();
+  }
+  function flushSharedQueue() {
+    if (!nm.sharedQueue.length || !(pos || FPGeo.parseCoords(nm.manualOrigin))) return;
+    var f = nm.sharedQueue; nm.sharedQueue = [];
+    processFiles(f);
+  }
 
   /* ------------------------------------------------------------ */
   /* Folha inferior, abas, rede, service worker.                   */
@@ -1651,5 +2214,8 @@
     if (updBar) updBar.addEventListener('click', function () { location.reload(); });
   }
 
+  refreshSuggestions();
+  renderNameBox();
+  takeSharedPrints();
   renderAll();
 })();

@@ -30,7 +30,7 @@ test('texto sem coordenadas devolve null', () => {
 // Conformidade: nenhum arquivo de código do app referencia domínios da Niantic.
 test('código do app não contém domínios da Niantic', () => {
   const root = path.join(__dirname, '..');
-  const files = ['index.html', 'app.js', 'geo.js', 'optimizer.js', 'plan.js', 'worker.js', 'sw.js', 'manifest.webmanifest'];
+  const files = ['index.html', 'app.js', 'geo.js', 'optimizer.js', 'plan.js', 'matching.js', 'printread.js', 'worker.js', 'sw.js', 'manifest.webmanifest'];
   const forbidden = /(ingress\.com|nianticlabs\.com|nianticspatial\.com|niantic\.com)/i;
   for (const f of files) {
     const src = fs.readFileSync(path.join(root, f), 'utf8');
@@ -38,15 +38,32 @@ test('código do app não contém domínios da Niantic', () => {
   }
 });
 
-test('CSP da página só permite rede para tiles do OSM', () => {
+test('CSP da página: tiles do OSM em img-src e só a API da Anthropic em connect-src', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
   const m = html.match(/http-equiv="Content-Security-Policy"\s+content="([^"]+)"/);
   assert.ok(m, 'CSP ausente');
   const csp = m[1];
   assert.match(csp, /default-src 'self'/);
-  assert.match(csp, /connect-src 'self'/);
-  const hosts = csp.match(/https:\/\/[^\s;]+/g) || [];
-  for (const h of hosts) assert.match(h, /tile\.openstreetmap\.org$/, `host inesperado na CSP: ${h}`);
+  const dirs = Object.fromEntries(csp.split(';').map(d => d.trim()).filter(Boolean).map(d => { const [k, ...v] = d.split(/\s+/); return [k, v]; }));
+  for (const [dir, vals] of Object.entries(dirs)) {
+    for (const h of vals.filter(v => /^https:/.test(v))) {
+      if (dir === 'img-src') assert.equal(h, 'https://tile.openstreetmap.org', `host inesperado em img-src: ${h}`);
+      else if (dir === 'connect-src') assert.equal(h, 'https://api.anthropic.com', `host inesperado em connect-src: ${h}`);
+      else assert.fail(`host ${h} em ${dir}`);
+    }
+  }
+  assert.deepEqual(dirs['connect-src'], ["'self'", 'https://api.anthropic.com']);
+});
+
+test('a única chamada de rede fora da origem é para a API da Anthropic, em printread.js', () => {
+  const root = path.join(__dirname, '..');
+  for (const f of ['app.js', 'geo.js', 'optimizer.js', 'plan.js', 'matching.js', 'printread.js', 'worker.js', 'sw.js']) {
+    const src = fs.readFileSync(path.join(root, f), 'utf8');
+    // www.google.com/maps só aparece como link que o usuário abre (rota do plano, v1.7.0); o app não faz a requisição
+    const urls = (src.match(/https:\/\/[a-z0-9.\-]+/gi) || []).filter(u => !/openstreetmap\.org$|^https:\/\/www\.google\.com$|api\.anthropic\.com$/.test(u));
+    assert.deepEqual(urls, [], `${f} cita host inesperado`);
+    if (f !== 'printread.js') assert.ok(!/api\.anthropic\.com/.test(src), `${f} chama a API fora de printread.js`);
+  }
 });
 
 // O service worker serve o app de um cache por VERSION: publicar código sem trocar a VERSION do

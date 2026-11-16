@@ -267,7 +267,20 @@
     return ev.reason || ev.type;
   }
 
+  /**
+   * Conteúdo do JSON exportado. Lista fechada de campos: chave da API, preferências de "Nomear por print",
+   * observações de prints e qualquer outra coisa fora do db nunca entram.
+   */
+  function exportPayload(db, now) {
+    return {
+      app: 'field-planner', version: 1, exportedAt: new Date(now || Date.now()).toISOString(),
+      portals: db.portals, blockers: db.blockers, done: db.done, excluded: db.excluded, coveredManual: db.coveredManual,
+      settings: db.settings, plan: db.plan
+    };
+  }
+
   return {
+    exportPayload: exportPayload,
     RECORD_V: RECORD_V, MOVE_WARN_M: MOVE_WARN_M, MOVE_RECALC_M: MOVE_RECALC_M, PERIODIC_RECALC_MS: PERIODIC_RECALC_MS,
     autoRecalcReason: autoRecalcReason,
     makeRecord: makeRecord, sanitizeRecord: sanitizeRecord, keyNeeds: keyNeeds,

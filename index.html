@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://tile.openstreetmap.org; connect-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://tile.openstreetmap.org; connect-src 'self' https://api.anthropic.com; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="theme-color" content="#0d1117">
 <meta name="referrer" content="strict-origin-when-cross-origin">
 <title>Field Planner</title>
@@ -153,6 +153,16 @@
   .field-warn { color: #f85149; font-size: 13px; margin-top: 4px; }
   #pinBtn.on { border-color: #58a6ff; color: #58a6ff; }
   tr.short td { color: #f85149; }
+  .nm-sug { display: flex; gap: 10px; align-items: flex-start; }
+  .nm-sug .grow { flex: 1; min-width: 0; }
+  .nm-thumb { width: 96px; border-radius: 6px; flex: none; }
+  .nm-opts label { display: flex; align-items: center; gap: 10px; min-height: 44px; margin: 0; cursor: pointer; }
+  .nm-opts input[type=checkbox] { width: 20px; height: 20px; min-height: 0; margin: 0; padding: 0; flex: none; accent-color: var(--accent, #2dd4bf); }
+  .nm-edit { margin-top: 8px; }
+  #nameBox input[type=text], #nameBox input[type=password] { flex: 1; min-width: 0; }
+  #nameBox input[type=number] { width: 4.5em; }
+  ul.list li.bad { color: #f85149; }
+  .nm-conflict { color: var(--warn); margin-top: 2px; }
   .fab { position: fixed; right: 12px; z-index: 1000; width: 52px; height: 52px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); font-size: 22px; }
   .export-box { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; margin: 8px 0; display: grid; gap: 8px; }
   .export-box .row { margin: 0; }
@@ -271,8 +281,12 @@
       <div class="row"><button id="undoImportBtn" class="btn grow" disabled>Desfazer última importação</button></div>
       <div class="row"><button id="wipeBtn" class="btn bad grow">Apagar todos os dados</button></div>
 
+      <h3>Nomear por print</h3>
+      <div id="nameBox" class="stack"></div>
+      <input id="printFiles" type="file" accept="image/*" multiple hidden>
+
       <h3>Conformidade</h3>
-      <p class="muted small">Ferramenta independente, sem afiliação à Niantic. Não se comunica com servidores do jogo nem com o app: todos os portais são inseridos por você (digitados, links colados ou arquivos que você escolhe importar) e ficam só neste aparelho. O plano só simula: sem chave não há link, e tudo acontece no jogo, a pé. O GPS é apenas lido. A única rede usada são os blocos de mapa do OpenStreetMap.</p>
+      <p class="muted small">Ferramenta independente, sem afiliação à Niantic. Não se comunica com servidores do jogo nem com o app: todos os portais são inseridos por você (digitados, links colados, arquivos que você escolhe importar ou nomes lidos de screenshots que você escolhe, sempre com a sua confirmação) e ficam só neste aparelho. O plano só simula: sem chave não há link, e tudo acontece no jogo, a pé. O GPS é apenas lido. Rede usada: os blocos de mapa do OpenStreetMap e, só se você ligar "Nomear por print", a API da Anthropic, para ler os screenshots que você escolher, com a sua chave. Nenhum serviço da Niantic é acessado. A imagem é enviada inteira; a IA é instruída a ignorar nomes de agentes, donos e COMM, e o app recusa respostas com dados de jogadores. Os screenshots não ficam guardados.</p>
       <p class="muted small" id="versionInfo"></p>
     </section>
   </div>
@@ -423,6 +437,8 @@
 <script src="geo.js"></script>
 <script src="optimizer.js"></script>
 <script src="plan.js"></script>
+<script src="matching.js"></script>
+<script src="printread.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

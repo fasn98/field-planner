@@ -2,6 +2,42 @@
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Datas no formato AAAA-MM-DD.
 
+## [1.10.0] — 2026-11-16
+A v1.9.0 está reservada para o sync na nuvem (ADR-0002, ainda em decisão).
+
+### Adicionado
+- **Nomear por print** (Ajustes, desligado por padrão; ADR-0003): troca nomes provisórios pelos nomes reais a partir de screenshots, com confirmação um a um.
+  - A leitura vai direto do navegador à API da Anthropic, com a chave do usuário e modelo configurável (padrão `claude-sonnet-5-5`). A resposta vem em JSON estrito e o app a valida de novo (`printread.js`).
+  - O casamento é determinístico e sem rede (`matching.js`):
+    - mapa: RANSAC, mínimos quadrados e atribuição húngara até 40 m;
+    - lista de chaves: anéis de distância a partir do GPS do recebimento, combinados entre prints, com trilateração;
+    - portal único: sempre confirmado.
+  - Revisão: aceitar, corrigir ou pular; "aceitar todos acima de X%"; e, só quando marcados, atualizar chaves e nível e ajustar posição.
+    - Num empate, o jogador escolhe ("É este").
+    - Dois nomes no mesmo portal ficam os dois pendentes, com aviso de conflito.
+    - O lote exige no mínimo 80% e deixa de fora as sugestões em conflito.
+  - Desfazer cobre nome, chaves, nível e posição. Renomear não recalcula o plano fixado.
+- **Correções do teste real de 16/11** (4 prints da lista de chaves):
+  - **Identidade por nome antes da distância.** O nome do print é comparado com TODOS os portais. A comparação ignora acentos, pontuação, o sufixo de rua depois de " - ", artigos e preposições, e aceita palavras quase iguais ("Manhathan" ≈ "Manhattan"). Similaridade ≥ 0,85 com o portal dentro do anel ×2 vira "✓ já cadastrado": o app só oferece atualizar chaves e nível (e ajustar posição com 3 ou mais observações) e nunca propõe renomear outro portal com esse nome. Antes, os 10 portais já nomeados à mão viravam sugestão de renomear um BK vizinho, ou "nenhum portal nesse anel".
+  - **Só portais provisórios recebem nome:** BK, CB, BW, GJ, ENS, "Portal NN" e "Enseada NN", e só os que nenhuma outra observação já reconheceu pelo nome.
+  - **Nome único:** o Aceitar fica bloqueado quando o nome já é de outro portal. A tela mostra qual é e oferece "É este".
+  - **Tolerância do anel:** 12 m + precisão do GPS (posição digitada: 10 m) + incerteza do portal (20 m se estimado ou nunca confirmado, 5 m se confirmado). Com 1 km ou mais, mais 60 m, e esse anel nunca decide sozinho. Antes ficava de fora, por exemplo, o cb-039 a 597,9 m de um portal a 575,2 m.
+  - **Uma observação só** nunca passa de 45% de confiança; duas origens, 70%; três, 85%.
+  - **Deduplicação:** a mesma imagem (pelo hash do conteúdo) é ignorada. A mesma observação (nome, origem a menos de 5 m e mesma distância) não conta de novo, mesmo vinda de outro print.
+  - **Checkboxes** "atualizar chaves/nível" com tamanho padrão, alinhados ao rótulo, com alvo de toque de 44 px.
+  - `tests/keylist-scenario.test.js`: cenário sintético com a mesma estrutura, com nomes e lugares inventados.
+  - `tests/real-16112026.test.js`: o caso real, que roda só no computador do dono, porque as fixtures em `tests/fixtures-local/` (fora do git) têm a posição de onde os prints foram tirados. Sem elas, o teste é pulado.
+- **Receber prints compartilhados** pelo Android (Web Share Target, só imagens). O app grava a posição do GPS no recebimento e avisa se a precisão passar de 25 m.
+- `tests/matching.test.js`, `tests/printread.test.js`, `tests/keylist-scenario.test.js` e `tests/real-16112026.test.js`: 140 testes com as fixtures locais; 134, mais 6 pulados, sem elas.
+
+### Alterado
+- **Política de conformidade:** ganha a regra 7, uma exceção explícita para chamadas à API da Anthropic iniciadas pelo usuário. O texto da aba Ajustes acompanha.
+- **CSP:** `connect-src` passa a liberar só `https://api.anthropic.com`, além da própria origem. O teste de conformidade exige exatamente isso.
+- **Exportar JSON:** usa uma lista fechada de campos (`plan.js`, `exportPayload`). Chave da API, preferências e observações de prints nunca entram.
+- **Desfazer:** passa a guardar também nome, nível, posição e observação dos portais. Editar, mover, 🔑 + / − e importar ganham o seu próprio ponto de desfazer; toques seguidos de 🔑 no mesmo portal contam como um só.
+  - Depois de uma importação, o ↶ volta as atualizações de portais existentes, os bloqueadores e os links marcados. Não volta as configurações vindas do arquivo. Os portais novos saem por "Desfazer última importação".
+- **Apagar todos os dados:** passa a apagar também a chave da API, as preferências e as observações de prints, além do cache de compartilhados.
+
 ## [1.8.0] — 2026-11-16
 ### Adicionado
 - **Plano fixo**: o plano fica salvo no aparelho (`db.plan` no localStorage) com o resultado completo e as entradas usadas no cálculo: partida, configurações, ids dos candidatos, data/hora e versão do app. Ao reabrir, o app restaura o plano como está, sem recalcular (`plan.js`, `makeRecord`/`sanitizeRecord`).

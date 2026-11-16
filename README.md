@@ -16,7 +16,8 @@ Estas regras são **inegociáveis** e fazem parte do design, não são opções:
 1. **Zero requisições a domínios da Niantic** (`ingress.com`, `intel.ingress.com`, `nianticspatial.com`
    e afins). Nenhum scraping, crawler, bot ou chamada automática de qualquer tipo.
 2. **Nenhuma integração, injeção ou leitura do app Ingress.** O Field Planner não lê tela, memória,
-   notificações, arquivos nem tráfego do jogo.
+   notificações, arquivos nem tráfego do jogo. Um screenshot só é lido quando o próprio usuário o escolhe
+   ou compartilha com o app (regra 7).
 3. **GPS somente leitura** via `navigator.geolocation.watchPosition`. O app nunca altera, simula ou
    falsifica posição. Sem GPS, ele planeja a partir do centro dos portais cadastrados — e diz isso na tela.
 4. **Nenhum dado de outros jogadores é armazenado.** Links bloqueadores guardam só os dois portais e a
@@ -26,25 +27,42 @@ Estas regras são **inegociáveis** e fazem parte do design, não são opções:
 5. **Os portais entram por ação manual do usuário**: digitados, link colado, ou arquivo JSON/texto que ele
    mesmo prepara e importa. Isso inclui coordenadas que ele estima a partir de prints de mapa. O app nunca
    captura tela, não lê nem baixa nada de serviços do jogo e não automatiza a coleta: só lê o arquivo que o
-   usuário escolhe. Os dados ficam apenas no aparelho (`localStorage`) e nada é enviado a servidor algum.
+   usuário escolhe. Os dados ficam apenas no aparelho (`localStorage`) e nada é enviado a servidor algum,
+   salvo a exceção da regra 7.
 6. **O plano não substitui o jogo.** O app só planeja; toda ação acontece no jogo, a pé. Sem a chave do
    portal (obtida em campo), não há link; sem link, não há campo; sem campo, não há MU. Todo link do plano
    usa só chaves que o usuário informou ter (`optimizer.js:137`). Nenhuma forma automatizada de agir no
    jogo ou de contornar suas regras faz parte do escopo.
+7. **Exceção explícita: API da Anthropic, iniciada pelo usuário** (ADR-0003). Com **Ajustes → Nomear por
+   print** ligado (vem desligado), as imagens que você escolhe ou compartilha vão direto do navegador para
+   `api.anthropic.com`, com a sua chave da API, para a IA transcrever nomes de portais.
+   - Nenhum serviço da Niantic é acessado.
+   - Os screenshots não ficam guardados.
+   - A imagem é enviada inteira, com o que estiver nela (inclusive nomes de agentes visíveis).
+   - A IA é instruída a ignorar agentes, donos e COMM, e o app recusa qualquer resposta que traga campo fora
+     da lista: nome, posição no print, endereço, distância, nível e chaves. Nada de outros jogadores é
+     guardado (regra 4).
+   - Nenhum nome é aplicado sem a sua confirmação.
+   - A chave da API fica só neste aparelho e nunca entra no JSON exportado.
 
 ### Como isso é garantido no código
 
 | Garantia | Onde |
 | :- | :- |
-| A página só pode buscar recursos de si mesma e imagens de `tile.openstreetmap.org` | CSP em `index.html` (`default-src 'self'`, `connect-src 'self'`) |
+| A página só pode buscar recursos de si mesma, imagens de `tile.openstreetmap.org` e chamar `api.anthropic.com` | CSP em `index.html` (`default-src 'self'`, `connect-src 'self' https://api.anthropic.com`) |
+| Só `printread.js` chama a API da Anthropic, e só com o recurso ligado e a chave salva | `readImage` em `printread.js`; teste em `tests/parse-and-compliance.test.js` |
+| Resposta da IA fora do formato (inclusive com campo de jogador) é recusada inteira | `validateReading` em `printread.js`; `tests/printread.test.js` |
+| A chave da API não entra no export nem em log | `exportPayload` em `plan.js` (lista fechada); `tests/printread.test.js` |
 | O service worker só intercepta a própria origem e os tiles do OSM | `sw.js` |
 | Import guarda só id, nome, posição, nível, chaves e observação; descarta qualquer outro campo (ex.: facção) | `sanitizePortal` em `app.js:64` |
 | Colar link **não abre** a URL: só extrai `lat,lng` por regex local | `parseCoords` em `geo.js` |
 | Teste automatizado falha se qualquer arquivo de código citar domínio da Niantic | `tests/parse-and-compliance.test.js` |
-| Teste automatizado falha se a CSP liberar outro host além do OSM | `tests/parse-and-compliance.test.js` |
+| Teste automatizado falha se a CSP liberar outro host além do OSM (imagens) e da API da Anthropic (conexão) | `tests/parse-and-compliance.test.js` |
 
-Única rede usada: **tiles do OpenStreetMap**, apenas os que você visualiza (cache conforme você navega,
-sem download em massa, respeitando a [política de uso de tiles do OSM](https://operations.osmfoundation.org/policies/tiles/)).
+Rede usada:
+- **Tiles do OpenStreetMap,** apenas os que você visualiza (cache conforme você navega, sem download em massa,
+  respeitando a [política de uso de tiles do OSM](https://operations.osmfoundation.org/policies/tiles/)).
+- **API da Anthropic,** só com "Nomear por print" ligado e só para as imagens que você escolher.
 
 ---
 
@@ -111,6 +129,68 @@ tela inicial" instala o app e ele abre sem internet (os tiles já visualizados f
   chave dele; portal com zero chaves (em vermelho) não recebe links.
 
 Na lista de portais, os botões `−`/`+` ajustam chaves rapidamente.
+
+### Nomear por print
+
+Troca nomes provisórios (BK 001, CB 050, "Portal 07"…) pelos nomes reais a partir dos seus screenshots do
+jogo, com confirmação um a um. Fica em **Ajustes → Nomear por print** e vem desligado.
+
+1. **Ligar:** o app avisa que as imagens vão para a API da Anthropic. Cole a sua chave da API (`sk-ant-…`).
+   Ela fica só neste aparelho; **Apagar chave** a remove. Sem chave, o recurso fica desabilitado. O modelo é
+   configurável; o padrão é `claude-sonnet-5-5`. Cada imagem é uma chamada cobrada na sua conta Anthropic.
+2. **Lista de chaves (modo principal):**
+   - Parado no lugar, tire o print do inventário de chaves no Ingress e **compartilhe direto com o Field
+     Planner** (Android, app instalado), ou toque em **📷 Escolher prints**.
+   - O app grava a posição do GPS e a precisão no momento em que a imagem chega. Com precisão acima de 25 m,
+     ele avisa e pede confirmação. Sem GPS, digite a posição.
+   - Cada linha lida vira uma observação: nome, endereço, distância, nível, chaves e a origem. A mesma imagem
+     reenviada é ignorada, e a mesma linha vinda de outro print não conta duas vezes.
+   - **Primeiro o nome:** se o nome do print bate (≥ 85%) com um portal já cadastrado, e esse portal está dentro do
+     anel ampliado, ele aparece em **✓ Já cadastrados**. Ali dá para atualizar chaves e nível, e ajustar posição
+     com 3 ou mais observações; o app nunca renomeia. A comparação ignora acentos, pontuação, o sufixo de rua
+     depois de " - ", artigos e preposições, e aceita palavras quase iguais.
+   - A observação vira um anel em volta da origem: ±(12 m + precisão do GPS + incerteza do portal). A
+     incerteza é de 20 m para portal estimado ou nunca confirmado e de 5 m para portal confirmado. A partir de
+     1 km, mais 60 m, e esse anel nunca decide sozinho.
+   - Só portais com nome provisório (BK, CB, BW, GJ, ENS, Portal NN, Enseada NN) recebem nome novo.
+   - **1 observação:** um único portal provisório no anel vira sugestão abaixo de 50%. A rua do endereço ajuda
+     a desempatar.
+   - **Observações de pontos diferentes** (a 30 m ou mais um do outro): os anéis se cruzam e os candidatos
+     diminuem.
+   - **3 ou mais, bem espalhadas:** trilateração. Com resíduo e erro esperado baixos, aparece também "ajustar
+     posição para a estimada (desloca X m)".
+   - Dois nomes nunca ficam com o mesmo portal: a atribuição é global.
+   - **Pendentes:** nomes com mais de um candidato. Você toca em **É este** no certo (o app nunca escolhe num
+     empate), ou tira outro print a uns 100 m dali.
+3. **Print de mapa:**
+   - A IA marca a posição de cada nome na imagem.
+   - O app acha escala e deslocamento entre o print e os portais cadastrados (rotação só se o mapa estiver
+     girado) e casa um-para-um, até 40 m.
+   - Com menos de 3 pontos casados, não sugere nada.
+   - Numa grade regular de ruas, se outro alinhamento casar quase tão bem, o print fica marcado como ambíguo e
+     nenhuma sugestão passa do limite de auto-aceite.
+4. **Revisão:**
+   - A lista mostra cada sugestão, ordenada por confiança: nome atual → nome sugerido, distância do ajuste e
+     miniatura do print com o ponto marcado.
+   - **✅ Aceitar**, **✏️ Corrigir** (outro nome ou outro portal) ou **⏭️ Pular**. Se o nome já é de outro
+     portal, o Aceitar fica bloqueado e aparece **É este**: dois portais nunca ficam com o mesmo nome. Se forem
+     de fato dois portais com o mesmo nome no jogo (o segundo "Graffiti" do bairro), renomeie o segundo pelo
+     diálogo do portal (toque no nome, na aba Portais).
+   - "Aceitar todos acima de X%" (no mínimo 80%) renomeia só o nome e deixa de fora as sugestões em
+     conflito, que são o mesmo portal com dois nomes ou o mesmo nome em dois portais. Essas ficam marcadas
+     para decidir uma a uma.
+   - Dois nomes que só cabem no mesmo portal vão os dois para Pendentes, com aviso de conflito: nenhum ganha
+     sozinho.
+   - Chaves, nível e posição só mudam se você marcar. Mover pede confirmação.
+   - **↶ Desfazer** volta nomes, chaves, nível e posição. Editar, mover, tocar em 🔑 + / − e importar também
+     entram no desfazer, então ele volta exatamente a última ação.
+   - Renomear não recalcula o plano. Mover mais de 30 m aparece no aviso de plano desatualizado.
+5. **Privacidade:**
+   - As imagens ficam só em memória, nesta tela. **Limpar imagens desta tela** descarta tudo.
+   - Um print compartilhado passa alguns instantes num cache do service worker e é apagado quando o app o lê.
+   - As observações ficam só neste aparelho (**Esquecer observações** apaga) e não entram no export.
+   - **Apagar todos os dados** apaga também a chave da API, as preferências, as observações (com as posições
+     de onde você tirou cada print) e o cache de compartilhados.
 
 ### Planejar e executar
 
@@ -223,6 +303,17 @@ junto com quantos campos a mais isso renderia.
 - Num plano fixado, pular um link (Falhou) não refaz os seguintes: se ele fechava um campo usado depois, o
   aviso de plano desatualizado mostra os passos afetados.
 - Os tiles em cache não expiram (máximo de 3000, `sw.js:11`).
+- Nomear por print:
+  - A lista de chaves só casa um portal cuja posição cadastrada esteja dentro do anel, ±(12 m + precisão).
+    Portais com posição estimada errada em mais que isso ficam pendentes ou sem candidato: corrija a posição,
+    ou use o print de mapa.
+  - A comparação de nomes ignora palavras de uma letra: "Bloco A" e "Bloco B" contam como o mesmo nome. Nesse
+    caso o app bloqueia o segundo, e você renomeia à mão.
+  - O print de mapa depende de a IA marcar bem os pontos. Numa grade regular de ruas ele pode sair ambíguo.
+  - Receber por compartilhamento só funciona no Android, com o app instalado (Web Share Target). No iPhone,
+    use **Escolher prints**.
+  - A posição gravada é a do momento em que o print chega ao app, não a do momento em que foi tirado.
+    Mande o print parado no mesmo lugar.
 - Os fluxos de `app.js` e `sw.js` não têm teste automatizado. As regras do plano fixo estão em `plan.js`
   e têm teste (`tests/plan.test.js`).
 
@@ -279,6 +370,10 @@ npm test     # node --test, sem dependências
 | `tests/parse-and-compliance.test.js` | extração de coordenadas; ausência de domínios da Niantic no código; CSP; `VERSION` igual em `app.js`, `sw.js` e `package.json` |
 | `tests/bulk-import.test.js` | importação em lote: leitura de linhas (link, coordenadas, nome), prioridade `!3d`/`pll=` em `parseCoords`, links curtos recusados |
 | `tests/plan.test.js` | plano fixo: registro salvo e restaurado igual (JSON), registro adulterado descartado, plano fixado não recalcula por GPS/5 min/dados/simulação, farm e "tem" acompanham as chaves de agora, validação de portal movido (> 30 m), excluído e link cruzando bloqueador, simulação → campo só com todas as chaves |
+| `tests/matching.test.js` | casamento: húngaro, nomes e ruas, mapa com escala conhecida e desconhecida + ruído de 15 m + ponto espúrio, mapa girado, portais a 8 m (confiança baixa), grade regular (ambíguo), anéis, empate resolvido por 2ª observação, rua desempata, nomes sem disputar o mesmo portal, ≥ 1 km nunca decide, trilateração com ruído de 10 m e com origens mal espalhadas |
+| `tests/keylist-scenario.test.js` | lista de chaves, cenário sintético com a estrutura do teste real: já cadastrados reconhecidos sem renomear (acento, artigo, erro de digitação, sufixo de rua, ≥ 1 km), empate com o candidato certo, nomes sem portal abaixo de 50%, linha repetida, nenhum nome repetido, "Mural 1"/"Mural 2" separados |
+| `tests/real-16112026.test.js` | caso real de 16/11 (4 prints contra o arquivo do Brooklin). Roda só com as fixtures em `tests/fixtures-local/`, que ficam fora do git por terem a posição de onde os prints foram tirados; sem elas, é pulado |
+| `tests/printread.test.js` | leitura da IA: resposta válida, JSON inválido ou fora do formato recusado (inclusive campo de jogador), pedido com cabeçalho de navegador e json_schema, erros 401/429/5xx/rede, chave fora de mensagens, logs e export, recurso desligado por padrão |
 | `tests/review-fixes.test.js` | ids `__proto__`/`constructor`/`toString` em portais, bloqueadores, done e excluded; portais na mesma posição nunca linkados; portal visitado sem links vira destino do fan |
 
 ## Publicar uma versão nova
@@ -297,7 +392,9 @@ index.html            UI, estilos e CSP
 app.js                estado, mapa, painéis, modo em campo, GPS (somente leitura)
 geo.js                geometria pura: haversine, interseção, ponto-no-triângulo, alcance, parse de coordenadas
 optimizer.js          otimizador puro (fanfield, triangulação, rota, chaves)
-plan.js               plano fixo: registro salvo, chaves ao vivo, validação contra os dados atuais
+plan.js               plano fixo: registro salvo, chaves ao vivo, validação contra os dados atuais; conteúdo do export
+matching.js           casamento de nomes lidos de prints com os portais (RANSAC, húngaro, anéis, trilateração), sem rede
+printread.js          leitura de prints pela API da Anthropic: pedido, validação da resposta, erros, chave e preferências
 worker.js             Web Worker que roda o otimizador
 sw.js                 service worker offline-first
 manifest.webmanifest  manifesto PWA (+ icon.svg, icon-192.png, icon-512.png)

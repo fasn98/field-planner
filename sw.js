@@ -7,14 +7,14 @@
  * Tiles OSM: cache-first com rede como fallback, só os que você já visualizou (sem download em massa,
  * conforme a política de uso de tiles do OSM). Qualquer outra origem: não intercepta.
  */
-var VERSION = 'fp-v1.8.0';
+var VERSION = 'fp-v1.10.0';
 var SHELL = 'shell-' + VERSION;
 var TILES = 'tiles-v2'; // v1 guardava respostas opacas, incompatíveis com requests CORS
 var TILE_HOST = 'tile.openstreetmap.org';
 var MAX_TILES = 3000;
 
 var ASSETS = [
-  './', 'index.html', 'app.js', 'geo.js', 'optimizer.js', 'plan.js', 'worker.js', 'manifest.webmanifest',
+  './', 'index.html', 'app.js', 'geo.js', 'optimizer.js', 'plan.js', 'matching.js', 'printread.js', 'worker.js', 'manifest.webmanifest',
   'icon.svg', 'icon-192.png', 'icon-512.png',
   'vendor/leaflet/leaflet.js', 'vendor/leaflet/leaflet.css',
   'vendor/leaflet/images/layers.png', 'vendor/leaflet/images/layers-2x.png',
@@ -48,8 +48,22 @@ function trimTiles() {
 
 self.addEventListener('fetch', function (e) {
   var req = e.request;
-  if (req.method !== 'GET') return;
   var url = new URL(req.url);
+  // Prints compartilhados (Web Share Target, só imagens): guarda por instantes num cache próprio e abre o app,
+  // que lê e apaga na hora. Nada sai do aparelho aqui.
+  if (req.method === 'POST' && url.origin === self.location.origin && /\/share-target$/.test(url.pathname)) {
+    e.respondWith(req.formData().then(function (fd) {
+      var files = fd.getAll('prints').filter(function (f) { return f && /^image\//.test(f.type); }).slice(0, 20);
+      return caches.open('share-inbox').then(function (c) {
+        return Promise.all(files.map(function (f, i) {
+          return c.put(new Request('./share-inbox/' + Date.now() + '-' + i + '-' + encodeURIComponent(f.name || 'print')),
+            new Response(f, { headers: { 'content-type': f.type } }));
+        }));
+      });
+    }).catch(function () {}).then(function () { return Response.redirect('./index.html?compartilhado=1', 303); }));
+    return;
+  }
+  if (req.method !== 'GET') return;
 
   if (url.origin === self.location.origin) {
     // cache-first, coerente por VERSION: todos os arquivos do app vêm sempre da mesma versão.

@@ -1,2 +1,5 @@
 node_modules/
 .claude/worktrees/
+
+# casos reais com a posição do dono: só neste computador (ver tests/real-16112026.test.js)
+tests/fixtures-local/
