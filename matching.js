@@ -426,24 +426,31 @@
   }
 
   /**
-   * Nome cortado pela tela: a mesma linha lida inteira em outro print (mesma origem a < 5 m e mesma distância
-   * abaixo de 1 km) vira esse nome inteiro ("Ninhos D" → "Ninhos De Pássaro"). Acima de 1 km a distância é
-   * arredondada pelo jogo e dois portais diferentes podem empatar: não junta. Duplicatas resultantes saem.
+   * Nome cortado pela tela: se a mesma linha veio inteira em outro print (mesma origem a < 5 m e mesma distância
+   * abaixo de 1 km), o pedaço ("Ninhos D") sai e fica só a observação inteira, com o endereço, as chaves e o nível
+   * dela. Acima de 1 km a distância é arredondada pelo jogo e dois portais diferentes podem empatar: não junta.
+   * Duplicatas também saem. Indexado por distância: a lista guardada pode ter até 2000 observações.
    */
   function mergeTruncated(list) {
-    var src = (list || []).filter(function (o) { return o && o.nome && o.distancia_m >= 0 && o.origem; });
-    var out = [];
-    src.forEach(function (o) {
-      var k = normName(o.nome), full = null;
-      if (k.length >= 3 && o.distancia_m < 1000) {
-        src.forEach(function (b) {
-          var kb = normName(b.nome);
-          if (kb.length > k.length && kb.indexOf(k) === 0 && Math.abs(b.distancia_m - o.distancia_m) < 0.05 &&
-              G.haversine(b.origem, o.origem) < 5 && (!full || kb.length > normName(full).length)) full = b.nome;
+    var src = [];
+    (list || []).forEach(function (o) { if (o && o.nome && o.distancia_m >= 0 && o.origem) src.push({ o: o, k: normName(o.nome), b: Math.floor(o.distancia_m * 10) }); });
+    var near = Object.create(null);
+    src.forEach(function (e) { if (e.o.distancia_m < 1000) (near[e.b] = near[e.b] || []).push(e); });
+    var around = function (idx, b) { return (idx[b - 1] || []).concat(idx[b] || [], idx[b + 1] || []); };
+    var out = [], seen = Object.create(null);
+    src.forEach(function (e) {
+      var o = e.o;
+      if (e.k.length >= 3 && o.distancia_m < 1000) {
+        var cut = around(near, e.b).some(function (f) {
+          return f.k.length > e.k.length && f.k.indexOf(e.k) === 0 && Math.abs(f.o.distancia_m - o.distancia_m) < 0.05 &&
+            G.haversine(f.o.origem, o.origem) < 5;
         });
+        if (cut) return; // a linha inteira está na lista e cobre esta
       }
-      var m = full ? Object.assign({}, o, { nome: full }) : o;
-      if (!out.some(function (x) { return isDuplicateObs(x, m); })) out.push(m);
+      var bucket = seen[e.k] = seen[e.k] || Object.create(null);
+      if (around(bucket, e.b).some(function (x) { return isDuplicateObs(x, o); })) return;
+      (bucket[e.b] = bucket[e.b] || []).push(o);
+      out.push(o);
     });
     return out;
   }

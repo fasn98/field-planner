@@ -264,3 +264,21 @@ test('borda: "longe" ordenado do mais perto ao mais distante e usa a menor dist�
   ], portals);
   assert.deepEqual(g.far.map(f => [f.nome, f.distancia_m]), [['Longe A', 7000], ['Longe B', 90000]]);
 });
+
+test('nome cortado lido antes: fica a observação inteira (endereço, chaves e nível dela), não a do pedaço', () => {
+  const o = [
+    { nome: 'Escultura d', endereco: 'R. Al', distancia_m: 182.4, nivel: 1, chaves: 0, origem, ts: 1 },
+    { nome: 'Escultura da Aurora', endereco: 'R. Alfa, 10', distancia_m: 182.4, nivel: 6, chaves: 2, origem, ts: 2 }
+  ];
+  const m = M.mergeTruncated(o);
+  assert.equal(m.length, 1);
+  assert.equal(m[0], o[1]);
+});
+
+test('mergeTruncated com 2000 observações termina rápido', () => {
+  const o = [];
+  for (let i = 0; i < 2000; i++) o.push({ nome: 'Portal número ' + i, distancia_m: (i * 7.3) % 3000, origem: Object.assign(at(i % 40, 0), { precisao: 10 }), ts: i });
+  const t0 = Date.now();
+  assert.equal(M.mergeTruncated(o).length, 2000);
+  assert.ok(Date.now() - t0 < 500, (Date.now() - t0) + ' ms');
+});

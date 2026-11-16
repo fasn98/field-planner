@@ -172,7 +172,9 @@ jogo, com confirmação um a um. Fica em **Ajustes → Nomear por print** e vem 
      a linha inteira aparecer em outro print tirado do mesmo ponto, com a mesma distância (abaixo de 1 km), o
      pedaço vira o nome inteiro.
    - **Longe daqui:** chaves de portais a mais de 5 km, sem portal com esse nome no app, ficam num grupo
-     recolhido no fim, sem pedir decisão. Portal longe que já está cadastrado continua em "Já cadastrados".
+     recolhido no fim, sem pedir decisão. Portal longe que já está cadastrado continua em "Já cadastrados"
+     quando o arredondamento da distância pelo jogo cabe na tolerância; muito longe (centenas de km) ele pode
+     aparecer em "Longe daqui".
 3. **Print de mapa:**
    - A IA marca a posição de cada nome na imagem.
    - O app acha escala e deslocamento entre o print e os portais cadastrados (rotação só se o mapa estiver

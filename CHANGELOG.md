@@ -6,9 +6,9 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 ### Alterado
 - **Nomear por print, lista de chaves: menos ruído nos pendentes** (teste em campo de 16/11, 13 pendentes, a maioria sem decisão possível).
   - O pedido à IA manda pular portal com nome cortado pela tela, em vez de copiar o pedaço visível ("Quadra de Squash do", "Ninhos D").
-  - Um pedaço que ainda vier é trocado pelo nome inteiro quando a mesma linha aparece inteira em outro print do mesmo ponto (origem a < 5 m), com a mesma distância, abaixo de 1 km. Acima de 1 km a distância é arredondada pelo jogo e não junta.
-  - Chaves de portais a mais de 5 km ("Praça …" a 438 km, "Pizzaiolo …" a 29 km) saem dos pendentes para um grupo recolhido, **Longe daqui**. Portal longe já cadastrado continua em "Já cadastrados".
-- 5 testes novos (`tests/keylist-scenario.test.js`, `tests/printread.test.js`).
+  - Um pedaço que ainda vier é trocado pelo nome inteiro quando a mesma linha aparece inteira em outro print do mesmo ponto (origem a < 5 m), com a mesma distância, abaixo de 1 km. Fica a observação inteira, com o endereço, as chaves e o nível dela. Acima de 1 km a distância é arredondada pelo jogo e não junta.
+  - Chaves de portais a mais de 5 km (de outras cidades) saem dos pendentes para um grupo recolhido, **Longe daqui**. Portal longe já cadastrado continua em "Já cadastrados".
+- 16 testes novos (`tests/keylist-scenario.test.js`, `tests/printread.test.js`).
 
 ## [1.10.1] — 2026-11-16
 ### Alterado
