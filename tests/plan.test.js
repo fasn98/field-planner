@@ -209,3 +209,66 @@ test('chave a menos em um único portal impede a ida para o campo e diz qual lin
   assert.equal(v.issues.filter(x => x.kind === 'chave').length, 1);
   assert.match(v.issues[0].text, new RegExp('sem chave de ' + short));
 });
+
+test('validação: par do plano marcado como falho (db.excluded) é acusado no passo certo', () => {
+  const ps = world(0);
+  const rec = record(ps, calc(ps));
+  const l = rec.result.links[0];
+  const v = FP.validate(rec, data(ps, { excluded: [{ from: l.from, to: l.to }] }));
+  const hit = v.issues.filter(x => x.n === l.n);
+  assert.equal(hit.length, 1);
+  assert.equal(hit[0].kind, 'invalido');
+  assert.match(hit[0].text, /par marcado como falho/);
+  assert.ok(hit[0].step >= 1);
+  assert.ok(v.steps.includes(hit[0].step));
+  assert.equal(v.ok, false);
+});
+
+test('validação: portal de origem marcado sob campo (coveredManual) impede o link', () => {
+  const ps = world(0);
+  const rec = record(ps, calc(ps));
+  const l = rec.result.links[0];
+  const v = FP.validate(rec, data(ps, { coveredManual: [l.from] }));
+  assert.ok(v.issues.some(x => x.n === l.n), 'link que sai de portal coberto deveria ser acusado');
+  assert.equal(v.ok, false);
+});
+
+test('sanitizeRecord: ids __proto__/constructor em positions não poluem nem entram como objeto especial', () => {
+  const ps = world(0);
+  const rec = clone(record(ps, calc(ps)));
+  const evil = JSON.parse('{"__proto__":[1,2],"constructor":[3,4],"toString":[5,6]}');
+  rec.positions = Object.assign(JSON.parse('{}'), evil, rec.positions);
+  const back = FP.sanitizeRecord(rec);
+  assert.ok(back);
+  assert.equal(({}).polluted, undefined);
+  assert.equal(Object.getPrototypeOf({}), Object.prototype);
+  assert.equal(Object.getPrototypeOf(back.positions), null);
+  assert.deepEqual(Object.keys(back.positions).sort(), Object.keys(rec.positions).sort());
+  // e o registro continua utilizável na validação
+  assert.doesNotThrow(() => FP.validate(back, data(ps)));
+});
+
+test('sanitizeRecord: link e passo com id __proto__/constructor não quebram nem poluem', () => {
+  for (const id of ['__proto__', 'constructor']) {
+    const raw = { result: { steps: [{ portal: id, walk: 0, links: [{ n: 1, from: id, to: 'B', fields: 0, area: 0 }] }], links: [], fields: [] } };
+    let back;
+    assert.doesNotThrow(() => { back = FP.sanitizeRecord(raw); });
+    assert.equal(({}).polluted, undefined);
+    assert.equal(Object.getPrototypeOf({}), Object.prototype);
+    if (back) {
+      assert.doesNotThrow(() => FP.keyNeeds(back.result, [portal('B', 0, 0)]));
+      assert.doesNotThrow(() => FP.validate(back, data([portal('B', 0, 0), portal('C', 100, 0)])));
+    }
+  }
+  // link cujo destino é __proto__: keyNeeds não pode contar como "já existente"
+  const k = FP.keyNeeds({ links: [{ n: 1, from: 'A', to: '__proto__' }, { n: 2, from: 'A', to: 'constructor' }] }, []);
+  assert.deepEqual(k.used.map(r => [r.portal, r.used]), [['__proto__', 1], ['constructor', 1]]);
+});
+
+test('sanitizeRecord: mais de 2000 links é descartado; 2000 exatos passam', () => {
+  const mk = (n) => ({ result: { steps: [{ portal: 'A', walk: 0, links: Array.from({ length: n }, (_, i) => ({ n: i + 1, from: 'A', to: 'B' + i, fields: 0, area: 0 })) }], links: [], fields: [] } });
+  assert.equal(FP.sanitizeRecord(mk(2001)), null);
+  const ok = FP.sanitizeRecord(mk(2000));
+  assert.ok(ok);
+  assert.equal(ok.result.links.length, 2000);
+});
