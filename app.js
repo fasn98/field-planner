@@ -8,7 +8,7 @@
   'use strict';
 
   var STORE = 'fieldplanner.v1';
-  var VERSION = '1.11.0';
+  var VERSION = '1.11.1';
   // nível padrão de portal novo ou importado sem nível: L1 só alcança 160 m e quase nunca fecha campo
   var DEFAULT_LEVEL = 5;
   // Qualquer string de 1–64 caracteres sem controle. A segurança contra "constructor"/"__proto__"
@@ -1396,7 +1396,6 @@
       if (hit) dup = 'já cadastrado: ' + hit.nome;
       else if ((hit = accepted.find(r))) dup = 'repetido da linha ' + hit.linha;
       r.dup = dup;
-      r.use = !dup;
       if (!dup) accepted.add(r);
       return r;
     });
@@ -1408,7 +1407,42 @@
         if (!r.erro && !r.nome && !!r.dup === dupPass) r.nome = 'Portal ' + String(n++).padStart(2, '0');
       });
     });
+    // a mesma regra dos outros cadastros: nome repetido e portal a menos de 30 m entram desmarcados, com aviso
+    var w = bulkWarnings(bulkRows, function (r) { return !r.erro && !r.dup; });
+    bulkRows.forEach(function (r, i) { if (!r.erro) { r.warn = w[i]; r.use = !r.dup && !w[i]; } });
     renderBulk();
+  }
+
+  /**
+   * Avisos de possível duplicata por linha (mesma regra do formulário de portal novo):
+   * nome igual ao de um portal do app ou ao de outra linha considerada, e portal do app a menos de 30 m.
+   * Nome provisório ("Portal 07", inclusive o automático das linhas sem nome) não conta como nome repetido.
+   */
+  function bulkWarnings(rows, consider) {
+    var seen = [];
+    return rows.map(function (r) {
+      if (r.erro || !consider(r)) return null;
+      var out = [], nome = String(r.nome || '').trim();
+      if (nome && !FPMatch.isProvisional(nome)) {
+        var same = FPMatch.sameNamePortal(nome, db.portals);
+        if (same) out.push('nome já cadastrado: ' + same.nome);
+        else {
+          var prev = seen.filter(function (x) { return FPMatch.nameSimilarity(nome, x.nome) >= FPMatch.SAME_NAME; })[0];
+          if (prev) out.push('mesmo nome da linha ' + prev.linha);
+        }
+        seen.push({ nome: nome, linha: r.linha });
+      }
+      if (!r.dup) {
+        var best = null, bd = Infinity;
+        db.portals.forEach(function (p) {
+          if (Math.abs(p.lat - r.lat) > 0.0005) return; // ~55 m em latitude: descarta rápido
+          var d = FPGeo.haversine(p, r);
+          if (d < bd) { bd = d; best = p; }
+        });
+        if (best && bd < 30) out.push('portal perto: ' + best.nome + ' a ' + fmtDist(bd));
+      }
+      return out.length ? out.join(' · ') : null;
+    });
   }
 
   /** Próximo número livre para "Portal NN", olhando os portais salvos e as linhas da prévia. */
@@ -1435,13 +1469,25 @@
         ]));
         return;
       }
-      if (r.dup) dup++; else ok++;
+      if (r.dup || r.warn) dup++; else ok++;
       var cb = el('input', { type: 'checkbox', 'aria-label': 'Importar linha ' + r.linha });
       cb.checked = r.use;
       cb.addEventListener('change', function () { r.use = cb.checked; updateBulkSave(); });
       var name = el('input', { type: 'text', maxlength: '80', placeholder: 'Nome (opcional)', 'aria-label': 'Nome do portal da linha ' + r.linha });
       name.value = r.nome || '';
-      name.addEventListener('input', function () { r.nome = name.value; updateBulkSave(); });
+      var meta = el('div', { class: 'meta' + (r.dup || r.warn ? ' warn' : '') });
+      var setMeta = function () {
+        meta.textContent = 'Linha ' + r.linha + ' · ' + r.lat.toFixed(6) + ', ' + r.lng.toFixed(6) + (r.dup ? ' · ' + r.dup : '') + (r.warn ? ' · ⚠ ' + r.warn : '');
+        meta.className = 'meta' + (r.dup || r.warn ? ' warn' : '');
+      };
+      setMeta();
+      name.addEventListener('input', function () {
+        r.nome = name.value;
+        // nome editado: confere de novo esta linha contra o app e as linhas anteriores
+        var idx = bulkRows.indexOf(r);
+        r.warn = bulkWarnings(bulkRows.slice(0, idx + 1), function (x) { return !x.erro; })[idx];
+        setMeta(); updateBulkSave();
+      });
       // Enter não pode submeter o formulário (o botão padrão é "Cancelar" e perderia a edição)
       name.addEventListener('keydown', function (e) {
         if (e.key !== 'Enter') return;
@@ -1449,10 +1495,7 @@
         var all = ul.querySelectorAll('input[type=text]'), i = Array.prototype.indexOf.call(all, name);
         if (all[i + 1]) all[i + 1].focus(); else name.blur();
       });
-      ul.appendChild(el('li', { class: 'bulk-row' }, [
-        cb, name,
-        el('div', { class: 'meta' + (r.dup ? ' warn' : ''), text: 'Linha ' + r.linha + ' · ' + r.lat.toFixed(6) + ', ' + r.lng.toFixed(6) + (r.dup ? ' · ' + r.dup : '') })
-      ]));
+      ul.appendChild(el('li', { class: 'bulk-row' }, [cb, name, meta]));
     });
     $('#bulkSummary').textContent = bulkRows.length
       ? ok + ' novo(s) · ' + dup + ' possível(is) duplicado(s) · ' + err + ' linha(s) sem coordenadas'
@@ -1469,6 +1512,19 @@
 
   $('#bulkDlg').addEventListener('close', function () {
     if ($('#bulkDlg').returnValue !== 'save') return;
+    // marcada de novo pelo jogador, linha com aviso pede confirmação (nada entra em duplicata sem perguntar)
+    var w = bulkWarnings(bulkRows, function (r) { return r.use; });
+    var risky = bulkRows.filter(function (r, i) { return !r.erro && r.use && (r.dup || w[i]); }).map(function (r) {
+      return 'linha ' + r.linha + ' (' + String(r.nome || '').trim() + '): ' + (r.dup || w[bulkRows.indexOf(r)]);
+    });
+    if (!risky.length) { importBulkRows(); return; }
+    confirmDialog('Pode ser duplicata', risky.length + ' linha(s) marcada(s) podem ser portal já cadastrado ou repetido: ' + risky.slice(0, 4).join('; ') +
+      (risky.length > 4 ? '; …' : '') + '. Importar mesmo assim?').then(function (ok) {
+      if (ok) { importBulkRows(); return; }
+      renderBulk(); $('#bulkDlg').returnValue = ''; $('#bulkDlg').showModal(); // volta à prévia, sem perder nada
+    });
+  });
+  function importBulkRows() {
     var nivel = clampInt(bulkForm.nivel.value, 1, 8, DEFAULT_LEVEL), chaves = clampInt(bulkForm.chaves.value, 0, 999, 0);
     var added = [], n = nextPortalNumber(), before = snapshot();
     bulkRows.forEach(function (r) {
@@ -1484,8 +1540,8 @@
     save();
     map.fitBounds(L.latLngBounds(added.map(function (p) { return [p.lat, p.lng]; })).pad(0.2));
     invalidatePlan();
-    toast(added.length + ' portal(is) importado(s). Ajuste nível e chaves na lista.', 4000);
-  });
+    toast(added.length + ' portal(is) importado(s). Ajuste nível e chaves na lista. ↶ Desfazer remove.', 4000);
+  }
 
   function renderUndoImport() {
     var b = $('#undoImportBtn'), li = db.lastImport;
