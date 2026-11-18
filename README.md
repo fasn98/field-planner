@@ -118,7 +118,11 @@ tela inicial" instala o app e ele abre sem internet (os tiles já visualizados f
   até 2000 linhas) com **uma linha por portal**: um link do Google Maps ou coordenadas, com nome opcional
   em qualquer ordem. Exemplos de linha: `Masp; -23.5614, -46.6558` ou `https://www.google.com/maps/place/…`.
   Sem nome na linha, usa o nome do lugar de um link `/maps/place/…`; sem nenhum nome, o portal vira `Portal 01`, `Portal 02`… (próximo número livre). A prévia é editável, aceita
-  nível e chaves padrão, e deixa desmarcados os portais a menos de 10 m de outro. Links nunca são abertos.
+  nível e chaves padrão, e deixa desmarcadas, com aviso, as linhas que podem ser duplicata (a mesma regra
+  dos outros cadastros): portal a menos de 10 m de outro (o mesmo), portal do app ou outra linha a menos de 30 m, nome igual
+  ao de um portal do app ou ao de outra linha. `Portal NN` (automático ou digitado) não conta como nome
+  repetido. Marcar de novo uma linha com aviso e importar pede confirmação; cancelar volta à prévia.
+  Links nunca são abertos.
   **Links curtos** (`maps.app.goo.gl`) não têm coordenadas e são recusados: abra o link no navegador e
   copie o endereço completo, ou toque e segure no mapa do Google Maps e copie as coordenadas.
 - **Ajustes → Importar/Exportar JSON** (formato abaixo).
