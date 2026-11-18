@@ -456,6 +456,42 @@
     return out;
   }
 
+  /**
+   * Observação vinda de fora (JSON importado): lista fechada de campos, tipos e faixas conferidos.
+   * { nome, endereco, distancia_m, nivel, chaves, origem: {lat, lng, precisao}, ts } ou null.
+   */
+  function sanitizeObservation(o) {
+    if (!o || typeof o !== 'object' || !o.origem || typeof o.origem !== 'object') return null;
+    var nome = typeof o.nome === 'string' ? o.nome.trim().slice(0, 80) : '';
+    var d = Number(o.distancia_m), lat = Number(o.origem.lat), lng = Number(o.origem.lng);
+    if (!nome || !isFinite(d) || d < 0 || d > 2e7 || !isFinite(lat) || !isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+    var int = function (v, lo, hi) { var n = Math.round(Number(v)); return v == null || v === '' || !isFinite(n) ? null : Math.max(lo, Math.min(hi, n)); };
+    var acc = Number(o.origem.precisao), ts = Number(o.ts);
+    return {
+      nome: nome, endereco: typeof o.endereco === 'string' && o.endereco.trim() ? o.endereco.trim().slice(0, 160) : null,
+      distancia_m: d, nivel: int(o.nivel, 1, 8), chaves: int(o.chaves, 0, 999),
+      origem: { lat: lat, lng: lng, precisao: isFinite(acc) && acc >= 0 ? Math.min(acc, 10000) : 0 },
+      ts: isFinite(ts) && ts > 0 ? ts : 0
+    };
+  }
+
+  /**
+   * Junta observações de outro aparelho às deste: valida cada uma, descarta repetidas (isDuplicateObs) e guarda
+   * no máximo `max` (as mais recentes por ts). Devolve { list, added, invalid }.
+   */
+  function mergeObservations(mine, incoming, max) {
+    var list = (mine || []).slice(), added = 0, invalid = 0;
+    (Array.isArray(incoming) ? incoming : []).forEach(function (raw) {
+      var o = sanitizeObservation(raw);
+      if (!o) { invalid++; return; }
+      if (list.some(function (x) { return isDuplicateObs(x, o); })) return;
+      list.push(o); added++;
+    });
+    max = max || 2000;
+    if (list.length > max) list = list.slice().sort(function (a, b) { return (a.ts || 0) - (b.ts || 0); }).slice(-max);
+    return { list: list, added: added, invalid: invalid };
+  }
+
   /** Quantas origens distintas (≥ 30 m entre si) uma lista de observações tem. */
   function distinctOrigins(obs) {
     var seen = [];
@@ -827,6 +863,6 @@
     portalUncertainty: portalUncertainty, sameNamePortal: sameNamePortal, SAME_NAME: SAME_NAME,
     streetTokens: streetTokens, streetCompatible: streetCompatible, isProvisional: isProvisional,
     hungarian: hungarian, fitSimilarity: fitSimilarity, matchMap: matchMap, ringTol: ringTol, trilaterate: trilaterate,
-    matchKeyList: matchKeyList, bulkDuplicates: bulkDuplicates, trustedTri: trustedTri, isDuplicateObs: isDuplicateObs, mergeTruncated: mergeTruncated, FAR_AWAY_M: FAR_AWAY_M, UNREG_MAX_ERR_M: UNREG_MAX_ERR_M, roundingErr: roundingErr, portalStreetKnown: portalStreetKnown, addressHasStreet: addressHasStreet, matchSingle: matchSingle, distinctOrigins: distinctOrigins, localFrame: localFrame
+    matchKeyList: matchKeyList, bulkDuplicates: bulkDuplicates, trustedTri: trustedTri, isDuplicateObs: isDuplicateObs, sanitizeObservation: sanitizeObservation, mergeObservations: mergeObservations, mergeTruncated: mergeTruncated, FAR_AWAY_M: FAR_AWAY_M, UNREG_MAX_ERR_M: UNREG_MAX_ERR_M, roundingErr: roundingErr, portalStreetKnown: portalStreetKnown, addressHasStreet: addressHasStreet, matchSingle: matchSingle, distinctOrigins: distinctOrigins, localFrame: localFrame
   };
 });

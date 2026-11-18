@@ -268,15 +268,24 @@
   }
 
   /**
-   * Conteúdo do JSON exportado. Lista fechada de campos: chave da API, preferências de "Nomear por print",
-   * observações de prints e qualquer outra coisa fora do db nunca entram.
+   * Conteúdo do JSON exportado. Lista fechada de campos: chave da API, preferências de "Nomear por print" e
+   * qualquer outra coisa fora do db nunca entram. As observações de prints (lista de chaves) só entram quando o
+   * usuário escolhe na hora de exportar (opts.observacoes), para juntar as leituras de dois aparelhos.
    */
-  function exportPayload(db, now) {
-    return {
+  function exportPayload(db, now, opts) {
+    var out = {
       app: 'field-planner', version: 1, exportedAt: new Date(now || Date.now()).toISOString(),
       portals: db.portals, blockers: db.blockers, done: db.done, excluded: db.excluded, coveredManual: db.coveredManual,
       settings: db.settings, plan: db.plan
     };
+    if (opts && Array.isArray(opts.observacoes) && opts.observacoes.length) {
+      // só os campos de uma observação, nunca outro dado que esteja pendurado nela
+      out.observacoes = opts.observacoes.map(function (o) {
+        return { nome: o.nome, endereco: o.endereco == null ? null : o.endereco, distancia_m: o.distancia_m, nivel: o.nivel == null ? null : o.nivel,
+          chaves: o.chaves == null ? null : o.chaves, origem: { lat: o.origem.lat, lng: o.origem.lng, precisao: o.origem.precisao || 0 }, ts: o.ts || 0 };
+      });
+    }
+    return out;
   }
 
   return {

@@ -8,7 +8,7 @@
   'use strict';
 
   var STORE = 'fieldplanner.v1';
-  var VERSION = '1.11.1';
+  var VERSION = '1.11.2';
   // nível padrão de portal novo ou importado sem nível: L1 só alcança 160 m e quase nunca fecha campo
   var DEFAULT_LEVEL = 5;
   // Qualquer string de 1–64 caracteres sem controle. A segurança contra "constructor"/"__proto__"
@@ -1174,12 +1174,21 @@
   $('#clearExclBtn').addEventListener('click', function () { db.excluded = []; save(); invalidatePlan(); });
 
   $('#exportBtn').addEventListener('click', function () {
-    var data = FPPlan.exportPayload(db); // lista fechada: chave da API e prints nunca entram
+    // observações de prints só entram se o usuário escolher: elas têm as posições de onde cada print foi tirado
+    var obs = typeof loadObs === 'function' ? loadObs() : [];
+    var ask = obs.length ? confirmDialog('Incluir observações?', 'Incluir no arquivo as ' + obs.length + ' observação(ões) de listas de chaves? ' +
+      'Elas guardam a posição de onde você tirou cada print. Servem para juntar as leituras deste aparelho com as do outro ' +
+      '(a trilateração usa as duas). Confirmar inclui; Cancelar exporta sem elas.') : Promise.resolve(false);
+    ask.then(function (withObs) { exportFile(withObs ? obs : null); });
+  });
+  function exportFile(obs) {
+    var data = FPPlan.exportPayload(db, null, obs ? { observacoes: obs } : null); // lista fechada: chave da API e imagens nunca entram
     var blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     var a = el('a', { href: URL.createObjectURL(blob), download: 'field-planner-' + new Date().toISOString().slice(0, 10) + '.json' });
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
-  });
+    if (obs) toast('Exportado com ' + obs.length + ' observação(ões) de prints', 4000);
+  }
   $('#importBtn').addEventListener('click', function () { $('#importFile').click(); });
   $('#importFile').addEventListener('change', function (e) {
     var file = e.target.files && e.target.files[0];
@@ -1264,8 +1273,18 @@
     if (db.portals.length) map.fitBounds(L.latLngBounds(db.portals.map(function (p) { return [p.lat, p.lng]; })).pad(0.2));
     invalidatePlan();
     toast('Importado: ' + added + ' novo(s), ' + updated + ' atualizado(s)' + (kept ? ', ' + kept + ' já existente(s) mantido(s)' : '') + ', ' + nb + ' bloqueador(es)', 5000);
+    if (!Array.isArray(data) && Array.isArray(data.observacoes)) importObservations(data.observacoes);
     var rec = Array.isArray(data) ? null : FPPlan.sanitizeRecord(data.plan);
     if (rec && rec.result.links.length) offerPlanRestore(rec);
+  }
+  /** Observações de prints de outro aparelho: juntam com as daqui (sem repetir) e entram na trilateração. */
+  function importObservations(list) {
+    var r = FPMatch.mergeObservations(observations, list, 2000);
+    if (!r.added) { if (list.length) toast('Observações do arquivo já estavam aqui (' + list.length + ')', 4000); return; }
+    observations = r.list; saveObs(observations);
+    refreshSuggestions(); renderNameBox();
+    toast(r.added + ' observação(ões) de prints juntada(s) às deste aparelho' + (r.invalid ? ' (' + r.invalid + ' inválida(s) ignorada(s))' : '') +
+      '. "Esquecer observações" apaga.', 6000);
   }
 
   /** Troca ids de portal (strings exatas) em bloqueadores, pares, coveredManual e plano do arquivo. */

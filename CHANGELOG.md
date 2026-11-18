@@ -2,6 +2,14 @@
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Datas no formato AAAA-MM-DD.
 
+## [1.11.2] — 2026-11-18
+### Adicionado
+- **Observações de listas de chaves no export/import do JSON**, para juntar as leituras de dois aparelhos (computador e celular) na trilateração.
+  - Exportar pergunta "Incluir observações?" quando há observações: elas guardam a posição de onde cada print foi tirado. Cancelar exporta sem elas.
+  - O arquivo leva só os campos de uma observação (`observacoes`: nome, endereço, distância, nível, chaves, origem e hora). A chave da API e as imagens nunca entram.
+  - Importar junta as observações às deste aparelho, sem repetir, com cada uma validada (`sanitizeObservation`, `mergeObservations` em `matching.js`), e guarda as 2000 mais recentes.
+- 5 testes novos (`tests/observations-export.test.js`), incluindo 2 leituras num aparelho + 1 no outro dando a posição estimada só depois de juntar.
+
 ## [1.11.1] — 2026-11-18
 ### Alterado
 - **Importar lista de links confere nome, além de distância** (a mesma regra de todas as formas de cadastro):
