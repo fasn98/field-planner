@@ -8,7 +8,7 @@
   'use strict';
 
   var STORE = 'fieldplanner.v1';
-  var VERSION = '1.10.2';
+  var VERSION = '1.11.0';
   // nível padrão de portal novo ou importado sem nível: L1 só alcança 160 m e quase nunca fecha campo
   var DEFAULT_LEVEL = 5;
   // Qualquer string de 1–64 caracteres sem controle. A segurança contra "constructor"/"__proto__"
@@ -200,7 +200,11 @@
   }
 
   // Toque longo (ou clique direito) adiciona portal no ponto.
-  map.on('contextmenu', function (e) { if (!moving) openPortalDlg(null, e.latlng); });
+  // Em "Marcar no mapa" (Nomear por print), o toque longo cadastra o portal do print dentro dos anéis.
+  map.on('contextmenu', function (e) {
+    if (ringMark && ringMark.pick) { ringPick(e.latlng); return; }
+    if (!moving) openPortalDlg(null, e.latlng);
+  });
 
   function renderPortals() {
     portalLayer.clearLayers();
@@ -963,21 +967,36 @@
         pushUndo(); Object.assign(editing, data);
         save(); invalidatePlan(); toast('Portal atualizado');
       } else {
-        // portal novo a menos de 30 m de outro: pode ser o mesmo (ex.: cadastrado pelo link de um print) → pergunta
-        var near = null, nd = Infinity;
-        db.portals.forEach(function (p) { var d = FPGeo.haversine(p, data); if (d < nd) { nd = d; near = p; } });
-        var add = function () { db.portals.push(data); save(); invalidatePlan(); toast('Portal adicionado'); };
-        if (near && nd < 30) {
+        // Nunca duplicar sem perguntar: mesmo nome de um portal cadastrado, ou outro portal a menos de 30 m
+        // (ex.: cadastrado pelo link de um print quando já existia com nome provisório).
+        var add = function () {
+          pushUndo(); // cadastro novo entra no desfazer: ↶ remove o portal
+          db.portals.push(data); save(); invalidatePlan(); toast('Portal adicionado. ↶ Desfazer remove.');
+          refreshNaming();
+        };
+        var reopen = function (msg) {
+          // não cadastrou: reabre o formulário com o que foi digitado, para não perder nada
+          openPortalDlg(null, null, { coords: { lat: data.lat, lng: data.lng }, nome: data.nome });
+          var g = $('#portalForm').elements;
+          g.nivel.value = String(data.nivel); g.chaves.value = String(data.chaves); g.observacao.value = data.observacao;
+          toast(msg);
+        };
+        var checkNear = function () {
+          var near = null, nd = Infinity;
+          db.portals.forEach(function (p) { var d = FPGeo.haversine(p, data); if (d < nd) { nd = d; near = p; } });
+          if (!(near && nd < 30)) { add(); return; }
           confirmDialog('Portal perto', 'Já existe “' + near.nome + '” a ' + fmtDist(nd) + ' daqui. Se for o mesmo portal, renomeie aquele ' +
             'em vez de cadastrar outro. Cadastrar mesmo assim?').then(function (ok) {
-            if (ok) { add(); return; }
-            // não cadastrou: reabre o formulário com o que foi digitado, para não perder nada
-            openPortalDlg(null, null, { coords: { lat: data.lat, lng: data.lng }, nome: data.nome });
-            var g = $('#portalForm').elements;
-            g.nivel.value = String(data.nivel); g.chaves.value = String(data.chaves); g.observacao.value = data.observacao;
-            toast('Cadastro não feito: confira o portal próximo ou salve de novo');
+            if (ok) add(); else reopen('Cadastro não feito: confira o portal próximo ou salve de novo');
           });
-        } else add();
+        };
+        var same = FPMatch.isProvisional(data.nome) ? null : FPMatch.sameNamePortal(data.nome, db.portals);
+        if (same) {
+          confirmDialog('Nome repetido', 'Já existe “' + same.nome + '” (a ' + fmtDist(FPGeo.haversine(same, data)) + ' daqui). Dois portais com o ' +
+            'mesmo nome quase sempre são o mesmo portal cadastrado duas vezes: se for, corrija a posição daquele (Mover). Cadastrar outro mesmo assim?').then(function (ok) {
+            if (ok) checkNear(); else reopen('Cadastro não feito: já existe um portal com esse nome');
+          });
+        } else checkNear();
       }
     } else if (v === 'move' && editing) {
       startMove(editing);
@@ -997,9 +1016,9 @@
   $('#addPortalBtn').addEventListener('click', function () {
     openPortalDlg(null, pos ? { lat: pos.lat, lng: pos.lng } : map.getCenter());
   });
-  var pasteName = ''; // nome já conhecido (ex.: lido de um print) para o portal cadastrado pelo link
-  function openPasteDlg(nome) {
-    pasteName = nome || '';
+  var pasteName = '', pasteExtra = null; // nome (e chaves/nível) já conhecidos, lidos de um print, para o portal cadastrado pelo link
+  function openPasteDlg(nome, extra) {
+    pasteName = nome || ''; pasteExtra = extra || null;
     var d = $('#pasteDlg');
     d.querySelector('textarea').value = '';
     d.returnValue = '';
@@ -1007,14 +1026,20 @@
   }
   $('#pasteBtn').addEventListener('click', function () { openPasteDlg(''); });
   $('#pasteDlg').addEventListener('close', function () {
-    var d = $('#pasteDlg'), nome = pasteName;
-    pasteName = '';
+    var d = $('#pasteDlg'), nome = pasteName, extra = pasteExtra;
+    pasteName = ''; pasteExtra = null;
     if (d.returnValue !== 'ok') return;
     var text = d.querySelector('textarea').value;
     var c = FPGeo.parseCoords(text);
     if (!c) { toast('Não encontrei coordenadas nesse texto. Digite lat/lng manualmente.', 4000); return; }
     map.setView([c.lat, c.lng], 17);
     openPortalDlg(null, null, { coords: c, nome: nome });
+    if (extra) {
+      var g = $('#portalForm').elements;
+      if (extra.nivel != null) g.nivel.value = String(clampInt(extra.nivel, 1, 8, DEFAULT_LEVEL));
+      if (extra.chaves != null) g.chaves.value = String(clampInt(extra.chaves, 0, 999, 0));
+      if (extra.observacao) g.observacao.value = extra.observacao;
+    }
   });
 
   // Mover portal no mapa: arrastar o marcador ou tocar no ponto certo.
@@ -1029,6 +1054,7 @@
   }
   function startMove(p) {
     endMove(false); // nunca dois pinos ao mesmo tempo
+    endRings();
     resetPageZoom(); // página ampliada no celular deixa a barra de salvar fora da tela
     var orig = { lat: p.lat, lng: p.lng };
     var mk = L.marker([p.lat, p.lng], { draggable: true, autoPan: true, zIndexOffset: 2000,
@@ -1180,9 +1206,9 @@
   }
 
   function applyImport(data, portals) {
-    var added = 0, updated = 0, kept = 0, autoN = nextPortalNumber(), addedIds = [];
+    var added = 0, updated = 0, kept = 0, autoN = nextPortalNumber(), addedIds = [], remap = Object.create(null), nRemap = 0;
     var near = nearIndex(db.portals);
-    pushUndo(); // atualizações de portais existentes pelo arquivo voltam com ↶ (os novos saem por "Desfazer última importação")
+    pushUndo(); // ↶ volta as atualizações e remove os portais novos (também saem por "Desfazer última importação")
     portals.forEach(function (raw) {
       var p = sanitizePortal(raw);
       if (!p) return;
@@ -1196,11 +1222,17 @@
       if (!hasId) {
         // sem id (arquivo feito à mão): mesmo lugar = mesmo portal; mantém chaves/nível já ajustados
         if (near.find(p)) { kept++; return; }
+      } else if (!semNome) {
+        // id de outro aparelho, mesmo lugar e mesmo nome: é o mesmo portal, não duplica; o que o arquivo liga
+        // a esse id (bloqueadores, links feitos, plano) passa a apontar para o portal mantido
+        var same = near.find(p, function (q) { return FPMatch.nameSimilarity(q.nome, p.nome) >= FPMatch.SAME_NAME; });
+        if (same) { remap[p.id] = same.id; nRemap++; kept++; return; }
       }
       if (semNome) p.nome = 'Portal ' + String(autoN++).padStart(2, '0'); // só quem entra de fato consome número
       db.portals.push(p); near.add(p); addedIds.push(p.id); added++;
     });
     recordImport(addedIds, 'arquivo JSON');
+    if (nRemap && !Array.isArray(data)) data = remapIds(data, remap);
     var ids = idSet(db.portals);
     var nb = 0, have = Object.create(null);
     db.blockers.forEach(function (b) { have[blockerKey(b)] = true; have['id:' + b.id] = true; });
@@ -1236,6 +1268,24 @@
     if (rec && rec.result.links.length) offerPlanRestore(rec);
   }
 
+  /** Troca ids de portal (strings exatas) em bloqueadores, pares, coveredManual e plano do arquivo. */
+  function remapIds(data, remap) {
+    var out = Object.assign({}, data);
+    ['blockers', 'done', 'excluded', 'coveredManual', 'plan'].forEach(function (k) {
+      if (out[k] == null) return;
+      out[k] = JSON.parse(JSON.stringify(out[k]), function (key, v) {
+        if (typeof v === 'string') return remap[v] || v;
+        if (v && typeof v === 'object' && !Array.isArray(v)) { // chaves por id (plan.positions)
+          var o = {};
+          Object.keys(v).forEach(function (kk) { o[remap[kk] || kk] = v[kk]; });
+          return o;
+        }
+        return v;
+      });
+    });
+    return out;
+  }
+
   /** Arquivo com plano: oferece restaurar (substitui o plano atual, sem recalcular). */
   function offerPlanRestore(rec) {
     var r = rec.result;
@@ -1267,13 +1317,13 @@
     var key = function (la, ln) { return Math.floor(la / CELL) + ':' + Math.floor(ln / CELL); };
     var idx = {
       add: function (p) { var k = key(p.lat, p.lng); (grid[k] = grid[k] || []).push(p); },
-      find: function (p) {
+      find: function (p, ok) {
         var r = Math.floor(p.lat / CELL), c = Math.floor(p.lng / CELL);
         // em longitude a célula encolhe com a latitude (22 m × cos): alarga a busca para cobrir DUP_M
         var span = Math.max(1, Math.ceil(DUP_M / (CELL * 111320 * Math.max(Math.cos(p.lat * Math.PI / 180), 0.01))));
         for (var i = -1; i <= 1; i++) for (var j = -span; j <= span; j++) {
           var b = grid[(r + i) + ':' + (c + j)];
-          if (b) for (var k = 0; k < b.length; k++) if (FPGeo.haversine(b[k], p) < DUP_M) return b[k];
+          if (b) for (var k = 0; k < b.length; k++) if (FPGeo.haversine(b[k], p) < DUP_M && (!ok || ok(b[k]))) return b[k];
         }
         return null;
       }
@@ -1420,7 +1470,7 @@
   $('#bulkDlg').addEventListener('close', function () {
     if ($('#bulkDlg').returnValue !== 'save') return;
     var nivel = clampInt(bulkForm.nivel.value, 1, 8, DEFAULT_LEVEL), chaves = clampInt(bulkForm.chaves.value, 0, 999, 0);
-    var added = [], n = nextPortalNumber();
+    var added = [], n = nextPortalNumber(), before = snapshot();
     bulkRows.forEach(function (r) {
       if (r.erro || !r.use) return;
       var nome = String(r.nome || '').trim() || 'Portal ' + String(n++).padStart(2, '0'); // usuário apagou o nome
@@ -1429,6 +1479,7 @@
     });
     bulkRows = [];
     if (!added.length) return;
+    undoPushes++; undoStack.push(before); if (undoStack.length > 30) undoStack.shift(); // ↶ remove os portais da lista
     recordImport(added.map(function (p) { return p.id; }), 'lista de links');
     save();
     map.fitBounds(L.latLngBounds(added.map(function (p) { return [p.lat, p.lng]; })).pad(0.2));
@@ -1628,6 +1679,12 @@
     var s = undoStack.pop();
     if (!s) { toast('Nada para desfazer'); return; }
     var snap = JSON.parse(s);
+    // portais cadastrados depois do snapshot (cadastro, lista de links, importação, Nomear por print) saem
+    var keep = Object.create(null), gone = Object.create(null), nGone = 0;
+    snap.portals.forEach(function (v) { keep[v[0]] = true; });
+    db.portals.forEach(function (p) { if (!keep[p.id]) { gone[p.id] = true; nGone++; } });
+    if (nGone) removePortals(gone);
+    lastKeyUndo = null; // o próximo 🔑 empilha o seu próprio passo (senão um ↶ depois dele voltaria dois passos)
     db.done = snap.done; db.excluded = snap.excluded; db.blockers = snap.blockers; db.coveredManual = snap.coveredManual;
     snap.portals.forEach(function (v) {
       var p = portalById(v[0]);
@@ -1639,6 +1696,7 @@
     autoOptimize('desfeito');
     renderAll();
     if (typeof refreshSuggestions === 'function') { refreshSuggestions(); renderNameBox(); }
+    if (nGone) toast('Desfeito: ' + nGone + ' portal(is) cadastrado(s) no último passo removido(s)', 5000);
   }
   $('#fUndo').addEventListener('click', undoLast);
   $('#fRecalc').addEventListener('click', function () { manualOptimize('recalculado manualmente'); });
@@ -1655,7 +1713,7 @@
   var MAX_IMG_SIDE = 1568;               // a API reduz imagens maiores; mandamos já reduzida
   var GPS_WARN_ACC = 25;
   var prefs = FPRead.loadPrefs(localStorage);
-  var nm = { items: [], mapSugs: [], singles: [], busy: false, origin: null, manualOrigin: '', editing: null, sharedQueue: [], skipped: Object.create(null), gen: 0, hashes: Object.create(null), doneRegistered: Object.create(null) };
+  var nm = { unregSel: Object.create(null), items: [], mapSugs: [], singles: [], busy: false, origin: null, manualOrigin: '', editing: null, sharedQueue: [], skipped: Object.create(null), gen: 0, hashes: Object.create(null), doneRegistered: Object.create(null) };
 
   function loadObs() {
     try { var a = JSON.parse(localStorage.getItem(OBS_STORE) || '[]'); return Array.isArray(a) ? a.filter(function (o) { return o && o.nome && o.origem; }) : []; }
@@ -1792,14 +1850,14 @@
     }
   }
 
-  var keySugs = [], keyPending = [], keyRegistered = [], keyFar = [];
+  var keySugs = [], keyPending = [], keyRegistered = [], keyUnreg = [];
   function refreshSuggestions() {
     var r = FPMatch.matchKeyList(observations, db.portals);
     keySugs = r.suggestions.filter(function (s) { return !nm.skipped[s.key + '\u0000' + s.portal]; })
       .map(function (s) { return Object.assign({ src: 'lista', dist: null }, s); });
     keyPending = r.pending;
     keyRegistered = r.registered;
-    keyFar = r.far || [];
+    keyUnreg = r.unregistered || [];
     // mapa: descarta sugestões cujo portal já foi renomeado ou excluído
     nm.mapSugs = nm.mapSugs.filter(function (s) { var p = portalById(s.portal); return p && FPMatch.isProvisional(p.nome); });
     nm.mapSugs.forEach(function (s) { var t = FPMatch.sameNamePortal(s.nome, db.portals, s.portal); s.nameTakenBy = t ? t.id : null; });
@@ -2009,20 +2067,27 @@
       var others = (pd.otherStreet || []).map(portalById).filter(Boolean).map(function (p) { return p.nome; });
       if (others.length) li.appendChild(el('div', { class: 'muted small', text: 'No anel, só portais de outras ruas: ' + others.slice(0, 4).join(' · ') }));
       li.appendChild(el('div', { class: 'row' }, [el('button', { class: 'btn sm', text: '📎 Cadastrar pelo link', onclick: function () { openPasteDlg(pd.nome); } })]));
-      // o sufixo de rua do provisório é só a rua mais próxima (portal de esquina): o jogador ainda pode escolher
-      var alt = el('div', { class: 'row' });
-      (pd.otherStreet || []).slice(0, 4).forEach(function (id) {
-        var p = portalById(id);
-        if (!p) return;
-        alt.appendChild(el('button', { class: 'btn sm ghost', text: 'É este mesmo assim: ' + p.nome + (origin ? ' · ' + fmtDist(FPGeo.haversine(origin, p)) : ''),
-          onclick: function () {
-            confirmDialog('Rua diferente', 'O print diz “' + (pd.notRegistered.street || 'outra rua') + '”, mas “' + p.nome + '” está cadastrado em outra rua. ' +
-              'Renomear para “' + pd.nome + '” mesmo assim?').then(function (ok) { if (ok) acceptName(id, pd.nome, null, {}); });
-          } }));
-      });
-      if (alt.childNodes.length) li.appendChild(alt);
+      var alt = otherStreetRow(pd, origin);
+      if (alt) li.appendChild(alt);
       return li;
     }
+    return pendingChoice(li, pd, origin);
+  }
+  /** O sufixo de rua do provisório é só a rua mais próxima (portal de esquina): o jogador ainda pode escolher. */
+  function otherStreetRow(pd, origin) {
+    var alt = el('div', { class: 'row' });
+    (pd.otherStreet || []).slice(0, 4).forEach(function (id) {
+      var p = portalById(id);
+      if (!p) return;
+      alt.appendChild(el('button', { class: 'btn sm ghost', text: 'É este mesmo assim: ' + p.nome + (origin ? ' · ' + fmtDist(FPGeo.haversine(origin, p)) : ''),
+        onclick: function () {
+          confirmDialog('Rua diferente', 'O print diz “' + (pd.notRegistered.street || 'outra rua') + '”, mas “' + p.nome + '” está cadastrado em outra rua. ' +
+            'Renomear para “' + pd.nome + '” mesmo assim?').then(function (ok) { if (ok) acceptName(id, pd.nome, null, {}); });
+        } }));
+    });
+    return alt.childNodes.length ? alt : null;
+  }
+  function pendingChoice(li, pd, origin) {
     // empate: o jogador decide qual é (o app nunca escolhe sozinho)
     var row = el('div', { class: 'row' });
     pd.candidates.slice(0, 6).forEach(function (id) {
@@ -2035,6 +2100,199 @@
     });
     if (row.childNodes.length) li.appendChild(row);
     return li;
+  }
+
+  /* Chaves sem portal no app: portais potenciais (v1.11.0). Regra principal: nunca criar duplicata. */
+
+  function refreshNaming() { if (prefs && prefs.enabled) { refreshSuggestions(); renderNameBox(); } }
+
+  /** Portais do app que podem ser o mesmo do print: mesmo nome em qualquer lugar, ou dentro do erro (mín. 30 m). */
+  function unregRisk(u) {
+    var same = FPMatch.sameNamePortal(u.nome, db.portals);
+    var near = [];
+    if (u.estimate) {
+      // erro da estimativa + incerteza da posição cadastrada (20 m se estimada, 5 m se confirmada); mínimo 30 m
+      db.portals.forEach(function (p) {
+        var d = FPGeo.haversine(p, u.estimate);
+        if (d <= Math.max(30, (u.estimate.expectedError || 0) + FPMatch.portalUncertainty(p))) near.push({ p: p, d: d });
+      });
+      near.sort(function (a, b) { return a.d - b.d; });
+    }
+    var maybe = u.maybeSame ? portalById(u.maybeSame) : null;
+    return { same: same, near: near, maybe: maybe, radius: u.estimate ? Math.max(30, u.estimate.expectedError || 0) : 0 };
+  }
+
+  /** Cadastra na posição estimada. Nome já cadastrado bloqueia; portal dentro do erro, ou dois do lote perto um do outro, pedem confirmação. */
+  function registerUnreg(list) {
+    var items = list.filter(function (u) { return u.estimate; }).map(function (u) {
+      return { u: u, p: sanitizePortal({ id: newId(), nome: u.nome, lat: u.estimate.lat, lng: u.estimate.lng, nivel: u.nivel == null ? DEFAULT_LEVEL : u.nivel,
+        chaves: u.chaves || 0, observacao: 'posição estimada por ' + u.obs + ' prints, erro ~' + u.estimate.expectedError + ' m' +
+          (u.estimate.checked ? '' : ', sem conferência') + '; conferir no Intel' }) };
+    }).filter(function (x) { return x.p; });
+    if (!items.length) return;
+    // nome igual a um portal do app, ou a outro item do mesmo lote (duas grafias lidas do mesmo portal): bloqueia
+    var blocked = items.filter(function (x, i) {
+      return FPMatch.sameNamePortal(x.p.nome, db.portals) ||
+        items.some(function (y, j) { return j !== i && FPMatch.nameSimilarity(x.p.nome, y.p.nome) >= FPMatch.SAME_NAME; });
+    });
+    if (blocked.length) {
+      toastError('Nome repetido (no app ou no próprio lote): ' + blocked.map(function (x) { return '“' + x.p.nome + '”'; }).join(', ') + '. Nada foi cadastrado; cadastre um por vez.');
+      refreshNaming();
+      return;
+    }
+    var warn = [];
+    items.forEach(function (x, i) {
+      var rk = unregRisk(x.u);
+      if (rk.near.length) warn.push('“' + rk.near[0].p.nome + '” está a ' + fmtDist(rk.near[0].d) + ' de “' + x.p.nome + '” (erro da estimativa ~' + fmtDist(rk.radius) + ')');
+      if (rk.maybe) warn.push('“' + rk.maybe.nome + '” (a ' + fmtDist(FPGeo.haversine(rk.maybe, x.p)) + ') pode ser “' + x.p.nome + '” com o nome cortado no app');
+      items.slice(i + 1).forEach(function (y) {
+        var d = FPGeo.haversine(x.p, y.p);
+        // duas estimativas do mesmo portal podem ficar até a soma dos dois erros uma da outra
+        if (d <= Math.max(30, x.u.estimate.expectedError + y.u.estimate.expectedError)) warn.push('“' + x.p.nome + '” e “' + y.p.nome + '” ficam a ' + fmtDist(d) + ' um do outro');
+      });
+    });
+    var go = function () {
+      pushUndo(); // um único desfazer para o lote
+      items.forEach(function (x) { db.portals.push(x.p); delete nm.unregSel[x.u.key]; });
+      save(); invalidatePlan(); refreshNaming();
+      toast(items.length + ' portal(is) cadastrado(s) na posição estimada. Confira no Intel. ↶ Desfazer remove.', 5000);
+    };
+    if (!warn.length) { go(); return; }
+    confirmDialog('Pode ser duplicata', warn.slice(0, 4).join('; ') + '. Se for o mesmo portal, use “É este” em vez de cadastrar. Cadastrar mesmo assim?')
+      .then(function (ok) { if (ok) go(); });
+  }
+
+  // anéis de distância no mapa: "Ver no mapa" e "Marcar no mapa" (toque longo dentro de um anel cadastra)
+  var ringLayer = L.layerGroup().addTo(map), ringMark = null;
+  function showRings(u, pick) {
+    endRings(); endMove(false);
+    var outer = [];
+    u.rings.forEach(function (r) {
+      L.circle([r.lat, r.lng], { radius: r.raio_m, color: '#58a6ff', weight: 2, fill: false, interactive: false }).addTo(ringLayer);
+      outer.push(L.circle([r.lat, r.lng], { radius: r.raio_m + r.tol_m, color: '#58a6ff', weight: 1, dashArray: '4 6', fill: false, interactive: false }).addTo(ringLayer));
+      if (r.raio_m - r.tol_m > 0) L.circle([r.lat, r.lng], { radius: r.raio_m - r.tol_m, color: '#58a6ff', weight: 1, dashArray: '4 6', fill: false, interactive: false }).addTo(ringLayer);
+      L.circleMarker([r.lat, r.lng], { radius: 4, color: '#58a6ff', fillOpacity: 1, interactive: false }).addTo(ringLayer);
+    });
+    if (u.estimate) {
+      L.circle([u.estimate.lat, u.estimate.lng], { radius: Math.max(5, u.estimate.expectedError), color: '#3fb950', weight: 2, fillOpacity: 0.15, interactive: false }).addTo(ringLayer);
+      L.circleMarker([u.estimate.lat, u.estimate.lng], { radius: 5, color: '#3fb950', fillOpacity: 1, interactive: false }).addTo(ringLayer);
+    }
+    ringMark = { u: u, pick: !!pick };
+    sheet.classList.add('min');
+    if (u.estimate && !pick) map.setView([u.estimate.lat, u.estimate.lng], 16);
+    else {
+      var b = null;
+      outer.forEach(function (c) { b = b ? b.extend(c.getBounds()) : c.getBounds(); });
+      if (u.estimate) b.extend([u.estimate.lat, u.estimate.lng]);
+      if (b) map.fitBounds(b.pad(0.05));
+    }
+    $('#ringHint').textContent = pick ? 'Toque longo dentro de um anel (entre as linhas tracejadas) para cadastrar'
+      : 'Círculo verde: posição estimada, erro ~' + fmtDist(u.estimate ? u.estimate.expectedError : 0);
+    $('#ringInfo').textContent = u.nome + ' · ' + u.rings.length + ' anel(éis) de distância';
+    $('#ringBar').hidden = false;
+  }
+  function endRings() { ringLayer.clearLayers(); ringMark = null; $('#ringBar').hidden = true; }
+  $('#ringClose').addEventListener('click', endRings);
+  function ringPick(ll) {
+    var u = ringMark.u, p = { lat: ll.lat, lng: ll.lng };
+    var inside = u.rings.every(function (r) { return Math.abs(FPGeo.haversine(r, p) - r.raio_m) <= r.tol_m; });
+    var open = function () {
+      endRings();
+      openPortalDlg(null, p, { nome: u.nome }); // o salvar confere nome repetido e portal a < 30 m
+      var f = $('#portalForm').elements;
+      f.nivel.value = String(clampInt(u.nivel, 1, 8, DEFAULT_LEVEL)); f.chaves.value = String(clampInt(u.chaves, 0, 999, 0));
+      f.observacao.value = 'posição marcada no mapa dentro do anel de ' + u.obs + ' print(s); conferir no Intel';
+    };
+    if (inside) { open(); return; }
+    confirmDialog('Fora dos anéis', 'Esse ponto fica fora de ' + (u.rings.length > 1 ? 'pelo menos um dos anéis' : 'o anel') + ' de distância de “' + u.nome + '”: pelos prints, o portal não está aí. Cadastrar aqui mesmo assim?')
+      .then(function (ok) { if (ok) open(); });
+  }
+
+  function unregRow(u) {
+    var rk = unregRisk(u), li = el('li', { class: u.cutOf ? 'nm-cut' : null });
+    var info = [u.chaves != null ? '🔑 ' + u.chaves : null, u.nivel != null ? 'L' + u.nivel : null,
+      u.estimate ? 'erro ~' + fmtDist(u.estimate.expectedError) : null, u.obs + ' observação(ões) de ' + u.origins + ' ponto(s)',
+      u.estimate && !u.estimate.checked ? 'sem conferência: com 3 pontos um print lido errado pode passar; um 4º ponto confere' : null].filter(Boolean).join(' · ');
+    var head = [];
+    var safe = u.estimate && !u.cutOf && !rk.same && !rk.near.length && !rk.maybe;
+    if (safe) {
+      var cb = el('input', { type: 'checkbox', 'aria-label': 'Selecionar ' + u.nome });
+      cb.checked = !!nm.unregSel[u.key];
+      cb.addEventListener('change', function () { if (cb.checked) nm.unregSel[u.key] = true; else delete nm.unregSel[u.key]; renderNameBox(); });
+      head.push(el('label', { class: 'nm-opts' }, [cb, el('b', { text: u.nome })]));
+    } else head.push(el('b', { text: u.nome }));
+    li.appendChild(el('div', null, head));
+    li.appendChild(el('div', { class: 'muted small', text: info }));
+    var pd = keyPending.filter(function (x) { return x.key === u.key; })[0];
+    if (pd && pd.notRegistered) {
+      li.appendChild(el('div', { class: 'muted small', text: pd.hint }));
+      var others = (pd.otherStreet || []).map(portalById).filter(Boolean).map(function (p) { return p.nome; });
+      if (others.length) li.appendChild(el('div', { class: 'muted small', text: 'No anel, só portais de outras ruas: ' + others.slice(0, 4).join(' · ') }));
+    }
+    if (u.cutOf) {
+      li.appendChild(el('div', { class: 'small nm-conflict', text: '⚠ parece pedaço cortado de “' + u.cutOf + '”: não cadastre por este nome' }));
+      return li;
+    }
+    if (rk.same) {
+      li.appendChild(el('div', { class: 'small nm-conflict', text: '⚠ já existe “' + rk.same.nome + '”: não cadastre de novo' }));
+      return li;
+    }
+    var row = el('div', { class: 'row' });
+    if (rk.maybe) li.appendChild(el('div', { class: 'small nm-conflict', text: '⚠ “' + rk.maybe.nome + '” (a ' +
+      fmtDist(FPGeo.haversine(rk.maybe, u.estimate || u.rings[0])) + (u.estimate ? '' : ' do print') + ') pode ser este portal, com o nome cortado no app. Se for, renomeie aquele em Portais.' }));
+    if (u.estimate) {
+      if (rk.near.length) {
+        li.appendChild(el('div', { class: 'small nm-conflict', text: '⚠ ' + rk.near.slice(0, 3).map(function (n) { return '“' + n.p.nome + '” a ' + fmtDist(n.d); }).join(', ') +
+          ', dentro do erro da estimativa: pode ser o mesmo portal. Fica fora do lote; decida aqui.' }));
+        // provisório perto: renomear em vez de duplicar
+        rk.near.filter(function (n) { return FPMatch.isProvisional(n.p.nome); }).slice(0, 3).forEach(function (n) {
+          row.appendChild(el('button', { class: 'btn sm', text: 'É este: ' + n.p.nome, onclick: function () {
+            confirmDialog('Confirmar nome', 'Renomear “' + n.p.nome + '” para “' + u.nome + '”?').then(function (ok) {
+              if (ok) acceptName(n.p.id, u.nome, { src: 'semportal', keys: u.chaves, nivel: u.nivel }, { keys: u.chaves != null, nivel: u.nivel != null });
+            });
+          } }));
+        });
+      }
+      row.appendChild(el('button', { class: 'btn sm ok', text: '➕ Cadastrar aqui', onclick: function () { registerUnreg([u]); } }));
+      row.appendChild(el('button', { class: 'btn sm', text: 'Ver no mapa', onclick: function () { showRings(u, false); } }));
+    } else {
+      var more = Math.max(1, 3 - u.origins);
+      li.appendChild(el('div', { class: 'muted small', text: u.origins >= 3
+        ? 'os pontos dos prints não bastam para estimar (muito alinhados ou distância arredondada): tire o print da lista de chaves de mais 1 ponto, a uns km daqui, fora da linha dos outros'
+        : 'tire o print da lista de chaves de mais ' + more + ' ponto(s) a uns km daqui' }));
+      row.appendChild(el('button', { class: 'btn sm', text: '📎 Cadastrar pelo link', onclick: function () {
+        openPasteDlg(u.nome, { nivel: u.nivel, chaves: u.chaves, observacao: 'cadastrado pelo link; chaves e nível lidos do print' });
+      } }));
+      row.appendChild(el('button', { class: 'btn sm', text: '📍 Marcar no mapa', onclick: function () { showRings(u, true); } }));
+    }
+    li.appendChild(row);
+    if (pd && pd.notRegistered) {
+      var alt = otherStreetRow(pd, observations.length ? observations[observations.length - 1].origem : null);
+      if (alt) li.appendChild(alt);
+    }
+    return li;
+  }
+
+  function renderUnreg(box) {
+    box.appendChild(el('h4', { text: 'Chaves sem portal no app (' + keyUnreg.length + ')' }));
+    var est = keyUnreg.filter(function (u) { return u.estimate && !u.cutOf; });
+    var noPos = keyUnreg.filter(function (u) { return !u.estimate || u.cutOf; });
+    if (est.length) {
+      box.appendChild(el('div', { class: 'small', text: 'Posição estimada (' + est.length + ')' }));
+      var sel = est.filter(function (u) { var rk = unregRisk(u); return nm.unregSel[u.key] && !rk.same && !rk.near.length && !rk.maybe; });
+      var batch = el('button', { class: 'btn sm', text: 'Cadastrar selecionados (' + sel.length + ')', onclick: function () { registerUnreg(sel); } });
+      batch.disabled = !sel.length;
+      box.appendChild(el('div', { class: 'row small' }, [batch]));
+      var ul = el('ul', { class: 'list nm-unreg' });
+      est.forEach(function (u) { ul.appendChild(unregRow(u)); });
+      box.appendChild(ul);
+    }
+    if (noPos.length) {
+      box.appendChild(el('div', { class: 'small', text: 'Falta posição (' + noPos.length + ')' }));
+      var ul2 = el('ul', { class: 'list nm-unreg' });
+      noPos.forEach(function (u) { ul2.appendChild(unregRow(u)); });
+      box.appendChild(ul2);
+    }
   }
 
   function renderNameBox() {
@@ -2128,25 +2386,22 @@
       box.appendChild(rl);
     }
     // portal único e pendentes: confirmação obrigatória
-    if (nm.singles.length || keyPending.length) {
-      box.appendChild(el('h4', { text: 'Pendentes (' + (nm.singles.length + keyPending.length) + ')' }));
+    // nome sem portal no app aparece uma vez só, em "Chaves sem portal no app"
+    var unregKeys = Object.create(null);
+    keyUnreg.forEach(function (u) { unregKeys[u.key] = true; });
+    var pendShown = keyPending.filter(function (pd) { return !unregKeys[pd.key]; });
+    if (nm.singles.length || pendShown.length) {
+      box.appendChild(el('h4', { text: 'Pendentes (' + (nm.singles.length + pendShown.length) + ')' }));
       var pl = el('ul', { class: 'list' });
       nm.singles.forEach(function (s) {
         pl.appendChild(pendingRow({ nome: s.nome, obs: 1, origins: 1, candidates: s.candidates, hint: 'print de um portal: escolha qual é' }, s.item.origin));
       });
       var lastOrigin = observations.length ? observations[observations.length - 1].origem : null;
-      keyPending.forEach(function (pd) { pl.appendChild(pendingRow(pd, lastOrigin)); });
+      pendShown.forEach(function (pd) { pl.appendChild(pendingRow(pd, lastOrigin)); });
       box.appendChild(pl);
     }
-    // chaves de portais a mais de 5 km (outras cidades): recolhidas, não pedem decisão
-    if (keyFar.length) {
-      var fl = el('ul', { class: 'list' });
-      keyFar.forEach(function (f) {
-        fl.appendChild(el('li', null, [el('span', { text: f.nome }), el('span', { class: 'muted small', text: ' · ' + (Math.round(f.distancia_m / 100) / 10).toLocaleString('pt-BR') + ' km' })]));
-      });
-      box.appendChild(el('details', { class: 'nm-far' }, [
-        el('summary', { class: 'small muted', text: 'Longe daqui, mais de 5 km (' + keyFar.length + '): chaves de outras cidades, nada a fazer' }), fl]));
-    }
+    // chaves sem portal no app: portais potenciais, para cadastrar (nunca em duplicata)
+    if (keyUnreg.length) renderUnreg(box);
     box.appendChild(el('div', { class: 'row' }, [
       el('button', { class: 'btn sm', text: '↶ Desfazer', onclick: undoLast }),
       el('button', { class: 'btn sm ghost', text: 'Esquecer observações (' + observations.length + ')', onclick: function () {
@@ -2154,11 +2409,11 @@
           if (!ok) return;
           nm.gen++; // leitura de lista em andamento não regrava o que acabou de ser esquecido
           nm.hashes = Object.create(null); nm.doneRegistered = Object.create(null); // os mesmos prints podem ser lidos de novo
-          observations = []; saveObs(observations); refreshSuggestions(); renderNameBox();
+          observations = []; saveObs(observations); nm.unregSel = Object.create(null); endRings(); refreshSuggestions(); renderNameBox();
         });
       } }),
       el('button', { class: 'btn sm ghost', text: 'Desligar', onclick: function () {
-        prefs.enabled = false; FPRead.savePrefs(localStorage, prefs); nm.gen++; nm.items = []; nm.mapSugs = []; nm.singles = [];
+        prefs.enabled = false; FPRead.savePrefs(localStorage, prefs); nm.gen++; nm.items = []; nm.mapSugs = []; nm.singles = []; endRings();
         nm.hashes = Object.create(null); renderNameBox();
       } })
     ]));
@@ -2206,7 +2461,7 @@
     try { localStorage.removeItem(FPRead.PREFS_STORE); localStorage.removeItem(OBS_STORE); } catch (e) { /* nada a apagar */ }
     if ('caches' in window) caches.delete('share-inbox').catch(function () {});
     prefs = FPRead.loadPrefs(localStorage);
-    observations = [];
+    observations = []; nm.unregSel = Object.create(null); endRings();
     nm.gen++; // leituras em andamento param e não gravam nada
     nm.items = []; nm.mapSugs = []; nm.singles = []; nm.sharedQueue = []; nm.editing = null; nm.skipped = Object.create(null);
     nm.hashes = Object.create(null); nm.doneRegistered = Object.create(null);

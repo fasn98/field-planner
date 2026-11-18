@@ -2,6 +2,24 @@
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Datas no formato AAAA-MM-DD.
 
+## [1.11.0] — 2026-11-18
+### Adicionado
+- **Nomear por print → Chaves sem portal no app:** o nome lido que não casa com nenhum portal do app vira um "portal potencial" para cadastrar. A seção substitui "Longe daqui".
+  - **Posição estimada** (3+ prints de 3+ pontos espalhados): trilateração que também usa as distâncias arredondadas do jogo (≥ 1 km), com peso pelo arredondamento. O erro mostrado é 1,5× o esperado pela geometria mais 3× o resíduo (cobriu 99% em simulação com leituras certas); só com erro até 150 m. Com 4+ pontos, conferência deixando um de fora; com 3, a estimativa fica marcada "sem conferência" (um print lido errado pode passar). **➕ Cadastrar aqui**, **Ver no mapa** e seleção múltipla com **Cadastrar selecionados**.
+  - **Falta posição:** dica de quantos pontos faltam, **📎 Cadastrar pelo link** (com chaves e nível do print) e **📍 Marcar no mapa** (anéis no mapa; o toque longo dentro de um anel abre o formulário preenchido; fora dos anéis pede confirmação).
+  - `matching.js`: `matchKeyList` devolve `unregistered` (`far` continua, por compatibilidade); `trilaterate(obs, { all: true })`.
+### Alterado
+- **Nunca duplicar portal:**
+  - nome igual a um portal do app (em qualquer lugar) ou pedaço do nome de um cadastrado não vira portal potencial; nome que é começo de outro da lista fica marcado como cortado, sem cadastro;
+  - portal do app dentro do erro da estimativa (mínimo 30 m) tira o nome do lote, mostra aviso e, para provisórios, **É este** (renomeia em vez de criar); cadastrar mesmo assim pede confirmação;
+  - o formulário de portal novo pede confirmação para nome igual a um existente ("Nome repetido"), além da regra de 30 m que já existia.
+- **↶ Desfazer remove portais cadastrados** depois do último passo: cadastro pelo formulário, lista de links, importação e Nomear por print. O aviso diz quantos foram removidos.
+- **Importar JSON:** portal com id de outro aparelho, no mesmo lugar (< 30 m) e com o mesmo nome de um portal do app, não entra de novo (conta como mantido); bloqueadores, links feitos e plano do arquivo ligados a ele passam a apontar para o portal mantido.
+- "Cadastrar selecionados" bloqueia o lote quando dois itens têm o mesmo nome (duas grafias lidas do mesmo portal); duas estimativas a menos da soma dos erros pedem confirmação. O raio de "pode ser o mesmo" soma a incerteza da posição cadastrada (20 m estimada, 5 m confirmada). Portal do app cujo nome é começo do lido ("Igreja Nossa Senhora" × "… da Conceição") vira aviso, fora do lote. "Marcar no mapa" pede confirmação fora de qualquer um dos anéis.
+- Corrigido: depois de um ↶, tocar 🔑 em menos de 10 s não empilhava passo, e o ↶ seguinte voltava dois passos.
+- Um nome pendente sem candidato aparece só em "Chaves sem portal no app", não também em Pendentes.
+- 23 testes novos (`tests/unregistered.test.js`). Nome provisório lido do print ("BK 009") nunca vira portal potencial; `cutOf` aponta para o nome mais longo.
+
 ## [1.10.2] — 2026-11-16
 ### Alterado
 - **Nomear por print, lista de chaves: menos ruído nos pendentes** (teste em campo de 16/11, 13 pendentes, a maioria sem decisão possível).

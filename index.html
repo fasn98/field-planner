@@ -140,6 +140,10 @@
   #moveBar { position: fixed; left: 12px; right: 12px; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); z-index: 2050; background: var(--panel);
     border: 1px solid var(--warn); border-radius: 14px; padding: 10px 12px; box-shadow: 0 4px 16px rgba(0,0,0,.5); max-width: 520px; margin: 0 auto; }
   #moveBar[hidden] { display: none; }
+  #ringBar { position: fixed; left: 12px; right: 12px; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); z-index: 2050; background: var(--panel);
+    border: 1px solid #58a6ff; border-radius: 14px; padding: 10px 12px; box-shadow: 0 4px 16px rgba(0,0,0,.5); max-width: 520px; margin: 0 auto; }
+  #ringBar[hidden] { display: none; }
+  .nm-unreg li.nm-cut { opacity: .7; }
   .move-hint { font-size: 13px; color: var(--muted); }
   .move-info { font-weight: 700; margin: 2px 0 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .move-pin { width: 28px; height: 28px; border-radius: 50%; background: rgba(210,153,34,.35); border: 3px solid #d29922; box-shadow: 0 0 0 2px #0d1117; }
@@ -430,6 +434,11 @@
   <div class="move-hint">Arraste o pino ou toque no lugar certo</div>
   <div id="moveInfo" class="move-info"></div>
   <div class="row"><button id="moveCancel" class="btn ghost sm">Cancelar</button><button id="moveDelete" class="btn bad sm">Excluir</button><span class="spacer"></span><button id="moveSave" class="btn primary sm">Salvar posição</button></div>
+</div>
+<div id="ringBar" hidden>
+  <div id="ringHint" class="move-hint">Toque longo dentro de um anel para cadastrar</div>
+  <div id="ringInfo" class="move-info"></div>
+  <div class="row"><span class="spacer"></span><button id="ringClose" class="btn ghost sm">Fechar</button></div>
 </div>
 <button id="updateBar" hidden>Nova versão disponível — toque para atualizar</button>
 

@@ -15,6 +15,7 @@
   var NEAR_RING_M = 12;        // lista de chaves: ±(12 m + precisão do GPS + incerteza do portal)
   var FAR_RING_M = 60;         // ≥ 1 km (o jogo arredonda): mais 60 m, e nunca decide sozinho
   var FAR_AWAY_M = 5000;       // chave de portal a mais de 5 km: outra cidade, fica fora dos pendentes
+  var UNREG_MAX_ERR_M = 150;   // portal potencial: posição estimada só com erro esperado até 150 m
   var PORTAL_UNC_EST_M = 20;   // portal com posição estimada ou nunca confirmada
   var PORTAL_UNC_OK_M = 5;     // portal confirmado
   var SAME_NAME = 0.85;        // similaridade mínima para "é o mesmo portal" 
@@ -464,12 +465,23 @@
     return seen.length;
   }
 
-  /** Trilateração por mínimos quadrados (Gauss-Newton) em metros locais. Devolve { pos, residual } ou null. */
-  function trilaterate(obs) {
-    var near = obs.filter(function (o) { return o.distancia_m < 1000; });
+  /** Arredondamento da distância pelo jogo: decímetro abaixo de 1 km, ±50 m até 10 km, ±500 m acima. */
+  function roundingErr(d) { return d < 1000 ? 0 : d < 10000 ? 50 : 500; }
+
+  /**
+   * Trilateração por mínimos quadrados (Gauss-Newton) em metros locais. Devolve { pos, residual, expectedError, sigma }
+   * ou null. Por padrão só usa anéis abaixo de 1 km (precisão de metros); com opts.all usa também os arredondados,
+   * com peso menor (para estimar a posição de um portal ainda não cadastrado, a km de distância).
+   */
+  function trilaterate(obs, opts) {
+    var all = !!(opts && opts.all);
+    var near = all ? obs.slice() : obs.filter(function (o) { return o.distancia_m < 1000; });
     if (near.length < 3 || distinctOrigins(near) < 3) return null;
     var ref = near[0].origem, F = localFrame(ref);
-    var O = near.map(function (o) { var m = F.to(o.origem); return { x: m.x, y: m.y, d: o.distancia_m, w: 1 / Math.pow(NEAR_RING_M + (o.origem.precisao || 0), 2) }; });
+    var O = near.map(function (o) {
+      var m = F.to(o.origem), sd = NEAR_RING_M + (o.origem.precisao || 0) + (all ? roundingErr(o.distancia_m) : 0);
+      return { x: m.x, y: m.y, d: o.distancia_m, w: 1 / (sd * sd) };
+    });
     // espalhamento: área do triângulo das origens (evita origens quase alinhadas)
     var spread = 0;
     for (var a = 0; a < O.length; a++) for (var b = a + 1; b < O.length; b++) for (var c = b + 1; c < O.length; c++) {
@@ -510,7 +522,7 @@
     var expected = dt > 1e-9 ? sig * Math.sqrt((j11 + j22) / dt) : Infinity;
     var pos = F.from(best);
     return { pos: { lat: pos.lat, lng: pos.lng }, residual: Math.round(best.res * 10) / 10,
-      expectedError: isFinite(expected) ? Math.round(expected * 10) / 10 : null };
+      expectedError: isFinite(expected) ? Math.round(expected * 10) / 10 : null, sigma: sig };
   }
 
   /**
@@ -520,6 +532,7 @@
    *   suggestion: { key, nome, portal, confidence, obs: n, origins: n, keys, nivel, estimate?: {lat,lng,residual,shift} }
    *   pending:    { key, nome, candidates: [ids], obs, origins, hint }
    *   far:        { key, nome, distancia_m } (todas as observações a mais de 5 km e o nome sem portal no app)
+   *   unregistered: ver unregisteredList (a UI usa esta; far fica por compatibilidade)
    */
   function matchKeyList(observations, portals) {
     var groups = groupObs(mergeTruncated(observations)), keys = Object.keys(groups);
@@ -555,6 +568,8 @@
       return false;
     });
     far.sort(function (a, b) { return a.distancia_m - b.distancia_m; });
+    var farKeys = Object.create(null);
+    far.forEach(function (f) { farKeys[f.key] = true; });
     // 2) renomear: só portais provisórios que nenhuma observação já reconheceu pelo nome
     var work = [];
     rest.forEach(function (k) {
@@ -662,7 +677,79 @@
             : 'tire outro print a uns 100 m daqui para separar ' + w.cands.length + ' candidatos' });
       }
     });
-    return { suggestions: suggestions.sort(byConf), pending: pending, registered: registered, named: named, far: far };
+    var unregistered = unregisteredList(groups, keys, registered, suggestions, pending, farKeys, portals);
+    return { suggestions: suggestions.sort(byConf), pending: pending, registered: registered, named: named, far: far, unregistered: unregistered };
+  }
+
+  /**
+   * Chaves sem portal no app: nenhum portal com o mesmo nome (SAME_NAME, em qualquer lugar), nenhum portal cujo nome
+   * comece por este (nome cortado de um cadastrado) e nenhum candidato provisório no anel (esses são renomeação, em
+   * Pendentes). Inclui os que vão para `far`.
+   *   { key, nome, endereco, chaves, nivel, obs, origins, rings: [{lat,lng,raio_m,tol_m}], estimate?, cutOf?, maybeSame? }
+   * maybeSame: id de um portal do app cujo nome é começo deste (talvez o mesmo, com o nome cortado no app).
+   * estimate só com 3+ observações de 3+ origens e trilateração confiável: a fina (trustedTri) ou, com anéis de
+   * km, a ponderada pelo arredondamento do jogo com erro esperado até 150 m.
+   * cutOf: outro nome da lista que começa por este (provável nome cortado); a UI não oferece cadastro.
+   */
+  /** Tirando cada observação (até 8), a trilateração das outras fica a até maxShift da estimativa com todas. */
+  function consistentWithout(obs, tri, maxShift, opts) {
+    var list = obs.slice(0, 8);
+    return list.every(function (_, i) {
+      var t = trilaterate(list.filter(function (__, j) { return j !== i; }), opts);
+      return !t || G.haversine(t.pos, tri.pos) <= maxShift;
+    });
+  }
+
+  function unregisteredList(groups, keys, registered, suggestions, pending, farKeys, portals) {
+    var skip = Object.create(null);
+    registered.forEach(function (r) { skip[r.key] = true; });
+    suggestions.forEach(function (s) { skip[s.key] = true; });
+    pending.forEach(function (pd) { if (pd.candidates.length) skip[pd.key] = true; }); // renomear um provisório, não cadastrar
+    var portalKeys = portals.map(function (p) { return normName(String(p.nome || '').split(/\s+[-–]\s*|\s*[-–]\s+/)[0]); });
+    var out = [];
+    keys.forEach(function (k) {
+      if (skip[k]) return;
+      var obs = groups[k], nome = obs[obs.length - 1].nome;
+      if (sameNamePortal(nome, portals)) return; // já existe com esse nome (talvez com a posição errada): nunca duplicar
+      if (isProvisional(nome)) return; // "BK 009", "Portal 07": nome do próprio app, não do jogo; nunca cadastrar com ele
+      // nome lido que é começo de um cadastrado: pedaço cortado daquele portal, fora
+      if (k.length >= 3 && portalKeys.some(function (pk) { return pk.length > k.length && pk.indexOf(k) === 0; })) return;
+      var last = obs.slice().sort(function (a, b) { return (b.ts || 0) - (a.ts || 0); })[0];
+      // cadastrado cujo nome é começo do lido ("Igreja Nossa Senhora" × "… da Conceição"): pode ser o mesmo portal
+      // com o nome cortado no app; não some da lista ("Mural" e "Mural Natural" podem ser dois), mas vira risco
+      var maybeIdx = -1;
+      portalKeys.forEach(function (pk, i) { if (maybeIdx < 0 && pk.length >= 3 && k.length > pk.length && k.indexOf(pk) === 0) maybeIdx = i; });
+      var u = { key: k, nome: last.nome, endereco: (obs.map(function (o) { return o.endereco; }).filter(Boolean)[0]) || null,
+        chaves: last.chaves, nivel: last.nivel, obs: obs.length, origins: distinctOrigins(obs), far: !!farKeys[k],
+        rings: obs.map(function (o) {
+          return { lat: o.origem.lat, lng: o.origem.lng, raio_m: o.distancia_m, tol_m: Math.round(ringTol(o.distancia_m, o.origem.precisao, 0).tol + roundingErr(o.distancia_m)) };
+        }) };
+      if (maybeIdx >= 0) u.maybeSame = portals[maybeIdx].id;
+      if (obs.length >= 3 && u.origins >= 3) {
+        var tri = trilaterate(obs), checked = false;
+        if (trustedTri(tri)) {
+          if (u.origins >= 4) { if (consistentWithout(obs, tri, Math.max(30, tri.expectedError), {})) checked = true; else tri = null; }
+        } else {
+          tri = trilaterate(obs, { all: true });
+          // Erro mostrado = 1,5× o esperado pela geometria (cobre ~97% com distâncias arredondadas, em simulação)
+          // + 3× o resíduo (uma leitura errada desloca a posição ~3× o resíduo que ela deixa). Resíduo acima de σ: recusa.
+          if (tri && tri.expectedError != null) tri.expectedError = Math.round(1.5 * tri.expectedError + 3 * tri.residual);
+          if (!(tri && tri.expectedError != null && tri.expectedError <= UNREG_MAX_ERR_M && tri.residual <= tri.sigma)) tri = null;
+          // com 4+ pontos dá para conferir: tirar qualquer um não pode mover a estimativa além do erro mostrado
+          else if (u.origins >= 4) { if (consistentWithout(obs, tri, tri.expectedError, { all: true })) checked = true; else tri = null; }
+        }
+        // com só 3 pontos, uma leitura errada pode não deixar rastro: o app avisa "sem conferência"
+        if (tri) u.estimate = { lat: tri.pos.lat, lng: tri.pos.lng, residual: tri.residual, expectedError: tri.expectedError, checked: checked };
+      }
+      out.push(u);
+    });
+    // nome que é começo de outro da lista: provável pedaço cortado do mesmo portal
+    out.forEach(function (u) {
+      var longer = out.filter(function (v) { return v !== u && v.key.length > u.key.length && v.key.indexOf(u.key) === 0; })
+        .sort(function (a, b) { return b.key.length - a.key.length; })[0]; // o mais longo: o nome inteiro, não outro pedaço
+      if (longer) u.cutOf = longer.nome;
+    });
+    return out.sort(function (a, b) { return (b.estimate ? 1 : 0) - (a.estimate ? 1 : 0) || a.nome.localeCompare(b.nome); });
   }
 
   /** Posição trilaterada confiável: resíduo e erro esperado pela geometria até 15 m. */
@@ -697,6 +784,6 @@
     portalUncertainty: portalUncertainty, sameNamePortal: sameNamePortal, SAME_NAME: SAME_NAME,
     streetTokens: streetTokens, streetCompatible: streetCompatible, isProvisional: isProvisional,
     hungarian: hungarian, fitSimilarity: fitSimilarity, matchMap: matchMap, ringTol: ringTol, trilaterate: trilaterate,
-    matchKeyList: matchKeyList, trustedTri: trustedTri, isDuplicateObs: isDuplicateObs, mergeTruncated: mergeTruncated, FAR_AWAY_M: FAR_AWAY_M, portalStreetKnown: portalStreetKnown, addressHasStreet: addressHasStreet, matchSingle: matchSingle, distinctOrigins: distinctOrigins, localFrame: localFrame
+    matchKeyList: matchKeyList, trustedTri: trustedTri, isDuplicateObs: isDuplicateObs, mergeTruncated: mergeTruncated, FAR_AWAY_M: FAR_AWAY_M, UNREG_MAX_ERR_M: UNREG_MAX_ERR_M, roundingErr: roundingErr, portalStreetKnown: portalStreetKnown, addressHasStreet: addressHasStreet, matchSingle: matchSingle, distinctOrigins: distinctOrigins, localFrame: localFrame
   };
 });
