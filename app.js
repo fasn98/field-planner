@@ -1206,7 +1206,7 @@
   }
 
   function applyImport(data, portals) {
-    var added = 0, updated = 0, kept = 0, autoN = nextPortalNumber(), addedIds = [];
+    var added = 0, updated = 0, kept = 0, autoN = nextPortalNumber(), addedIds = [], remap = Object.create(null), nRemap = 0;
     var near = nearIndex(db.portals);
     pushUndo(); // ↶ volta as atualizações e remove os portais novos (também saem por "Desfazer última importação")
     portals.forEach(function (raw) {
@@ -1219,17 +1219,20 @@
         if (semNome) p.nome = ex.nome;
         Object.assign(ex, p); updated++; return;
       }
-      var nb0 = near.find(p);
       if (!hasId) {
         // sem id (arquivo feito à mão): mesmo lugar = mesmo portal; mantém chaves/nível já ajustados
-        if (nb0) { kept++; return; }
-      } else if (nb0 && !semNome && FPMatch.nameSimilarity(nb0.nome, p.nome) >= FPMatch.SAME_NAME) {
-        kept++; return; // id de outro aparelho, mesmo lugar e mesmo nome: é o mesmo portal, não duplica
+        if (near.find(p)) { kept++; return; }
+      } else if (!semNome) {
+        // id de outro aparelho, mesmo lugar e mesmo nome: é o mesmo portal, não duplica; o que o arquivo liga
+        // a esse id (bloqueadores, links feitos, plano) passa a apontar para o portal mantido
+        var same = near.find(p, function (q) { return FPMatch.nameSimilarity(q.nome, p.nome) >= FPMatch.SAME_NAME; });
+        if (same) { remap[p.id] = same.id; nRemap++; kept++; return; }
       }
       if (semNome) p.nome = 'Portal ' + String(autoN++).padStart(2, '0'); // só quem entra de fato consome número
       db.portals.push(p); near.add(p); addedIds.push(p.id); added++;
     });
     recordImport(addedIds, 'arquivo JSON');
+    if (nRemap && !Array.isArray(data)) data = remapIds(data, remap);
     var ids = idSet(db.portals);
     var nb = 0, have = Object.create(null);
     db.blockers.forEach(function (b) { have[blockerKey(b)] = true; have['id:' + b.id] = true; });
@@ -1265,6 +1268,24 @@
     if (rec && rec.result.links.length) offerPlanRestore(rec);
   }
 
+  /** Troca ids de portal (strings exatas) em bloqueadores, pares, coveredManual e plano do arquivo. */
+  function remapIds(data, remap) {
+    var out = Object.assign({}, data);
+    ['blockers', 'done', 'excluded', 'coveredManual', 'plan'].forEach(function (k) {
+      if (out[k] == null) return;
+      out[k] = JSON.parse(JSON.stringify(out[k]), function (key, v) {
+        if (typeof v === 'string') return remap[v] || v;
+        if (v && typeof v === 'object' && !Array.isArray(v)) { // chaves por id (plan.positions)
+          var o = {};
+          Object.keys(v).forEach(function (kk) { o[remap[kk] || kk] = v[kk]; });
+          return o;
+        }
+        return v;
+      });
+    });
+    return out;
+  }
+
   /** Arquivo com plano: oferece restaurar (substitui o plano atual, sem recalcular). */
   function offerPlanRestore(rec) {
     var r = rec.result;
@@ -1296,13 +1317,13 @@
     var key = function (la, ln) { return Math.floor(la / CELL) + ':' + Math.floor(ln / CELL); };
     var idx = {
       add: function (p) { var k = key(p.lat, p.lng); (grid[k] = grid[k] || []).push(p); },
-      find: function (p) {
+      find: function (p, ok) {
         var r = Math.floor(p.lat / CELL), c = Math.floor(p.lng / CELL);
         // em longitude a célula encolhe com a latitude (22 m × cos): alarga a busca para cobrir DUP_M
         var span = Math.max(1, Math.ceil(DUP_M / (CELL * 111320 * Math.max(Math.cos(p.lat * Math.PI / 180), 0.01))));
         for (var i = -1; i <= 1; i++) for (var j = -span; j <= span; j++) {
           var b = grid[(r + i) + ':' + (c + j)];
-          if (b) for (var k = 0; k < b.length; k++) if (FPGeo.haversine(b[k], p) < DUP_M) return b[k];
+          if (b) for (var k = 0; k < b.length; k++) if (FPGeo.haversine(b[k], p) < DUP_M && (!ok || ok(b[k]))) return b[k];
         }
         return null;
       }
