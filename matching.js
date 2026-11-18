@@ -479,16 +479,29 @@
    * Junta observações de outro aparelho às deste: valida cada uma, descarta repetidas (isDuplicateObs) e guarda
    * no máximo `max` (as mais recentes por ts). Devolve { list, added, invalid }.
    */
-  function mergeObservations(mine, incoming, max) {
+  function mergeObservations(mine, incoming, max, now) {
+    max = max || 2000;
+    now = now || Date.now();
     var list = (mine || []).slice(), added = 0, invalid = 0;
-    (Array.isArray(incoming) ? incoming : []).forEach(function (raw) {
+    // índice por nome: comparar só com as observações do mesmo nome (o arquivo pode ter dezenas de milhares)
+    var idx = Object.create(null);
+    list.forEach(function (o) { var k = normName(o.nome); (idx[k] = idx[k] || []).push(o); });
+    var inc = Array.isArray(incoming) ? incoming.slice(-max) : []; // nunca mais que o limite entra na conta
+    if (Array.isArray(incoming) && incoming.length > inc.length) invalid += incoming.length - inc.length;
+    inc.forEach(function (raw) {
       var o = sanitizeObservation(raw);
       if (!o) { invalid++; return; }
-      if (list.some(function (x) { return isDuplicateObs(x, o); })) return;
-      list.push(o); added++;
+      if (o.ts > now) o.ts = now; // hora no futuro não pode empurrar as daqui para fora do limite
+      var k = normName(o.nome), b = idx[k] = idx[k] || [];
+      if (b.some(function (x) { return isDuplicateObs(x, o); })) return;
+      b.push(o); list.push(o); added++;
     });
-    max = max || 2000;
-    if (list.length > max) list = list.slice().sort(function (a, b) { return (a.ts || 0) - (b.ts || 0); }).slice(-max);
+    if (list.length > max) {
+      var keep = list.slice().sort(function (a, b) { return (a.ts || 0) - (b.ts || 0); }).slice(-max);
+      var kept = new Set(keep);
+      added = list.filter(function (o, i) { return i >= (mine || []).length && kept.has(o); }).length; // só as que ficaram
+      list = keep;
+    }
     return { list: list, added: added, invalid: invalid };
   }
 

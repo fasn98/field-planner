@@ -66,3 +66,14 @@ test('o objetivo: 2 leituras no computador + 1 no celular, juntas, dão a posiç
   assert.equal(u.origins, 3);
   assert.ok(G.haversine(u.estimate, real) <= u.estimate.expectedError);
 });
+
+test('mergeObservations: hora no futuro vira agora; muitas observações terminam rápido', () => {
+  const r = M.mergeObservations([], [ob(0, 0, 9e15)], 2000, 1000);
+  assert.equal(r.list[0].ts, 1000);
+  const many = Array.from({ length: 30000 }, (_, i) => Object.assign(ob(i % 50 * 40, 0, i + 1), { nome: 'Portal ' + (i % 3000) + ' Nome' }));
+  const t0 = Date.now();
+  const big = M.mergeObservations([], many, 2000);
+  assert.ok(Date.now() - t0 < 3000, (Date.now() - t0) + ' ms');
+  assert.equal(big.list.length, 2000);
+  assert.ok(big.added <= 2000);
+});

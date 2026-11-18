@@ -1177,7 +1177,7 @@
     // observações de prints só entram se o usuário escolher: elas têm as posições de onde cada print foi tirado
     var obs = typeof loadObs === 'function' ? loadObs() : [];
     var ask = obs.length ? confirmDialog('Incluir observações?', 'Incluir no arquivo as ' + obs.length + ' observação(ões) de listas de chaves? ' +
-      'Elas guardam a posição de onde você tirou cada print. Servem para juntar as leituras deste aparelho com as do outro ' +
+      'Elas guardam a posição, a data e a hora de cada print (um histórico de onde você esteve). Servem para juntar as leituras deste aparelho com as do outro ' +
       '(a trilateração usa as duas). Confirmar inclui; Cancelar exporta sem elas.') : Promise.resolve(false);
     ask.then(function (withObs) { exportFile(withObs ? obs : null); });
   });
@@ -1273,9 +1273,22 @@
     if (db.portals.length) map.fitBounds(L.latLngBounds(db.portals.map(function (p) { return [p.lat, p.lng]; })).pad(0.2));
     invalidatePlan();
     toast('Importado: ' + added + ' novo(s), ' + updated + ' atualizado(s)' + (kept ? ', ' + kept + ' já existente(s) mantido(s)' : '') + ', ' + nb + ' bloqueador(es)', 5000);
-    if (!Array.isArray(data) && Array.isArray(data.observacoes)) importObservations(data.observacoes);
+    if (!Array.isArray(data) && Array.isArray(data.observacoes) && data.observacoes.length) {
+      // depois do resumo do import, para não apagá-lo
+      var obsList = data.observacoes;
+      setTimeout(function () { askImportObservations(obsList); }, 1200);
+    }
     var rec = Array.isArray(data) ? null : FPPlan.sanitizeRecord(data.plan);
     if (rec && rec.result.links.length) offerPlanRestore(rec);
+  }
+  /**
+   * Observações de prints no arquivo: só entram com confirmação. São posições e horários de quem tirou os prints;
+   * de outro jogador, não podem ser guardadas (política de conformidade, regra 4).
+   */
+  function askImportObservations(list) {
+    confirmDialog('Observações no arquivo', 'O arquivo traz ' + list.length + ' observação(ões) de listas de chaves, com a posição, a data e a hora ' +
+      'de cada print. Importe só se forem SUAS (do seu outro aparelho): dados de outros jogadores não podem ser guardados. Importar?')
+      .then(function (ok) { if (ok) importObservations(list); else toast('Observações do arquivo não importadas', 4000); });
   }
   /** Observações de prints de outro aparelho: juntam com as daqui (sem repetir) e entram na trilateração. */
   function importObservations(list) {
