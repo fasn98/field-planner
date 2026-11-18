@@ -171,10 +171,31 @@ jogo, com confirmação um a um. Fica em **Ajustes → Nomear por print** e vem 
    - **Nome cortado:** a IA pula portal com nome cortado pela tela. Se mesmo assim um pedaço vier ("Ninhos D") e
      a linha inteira aparecer em outro print tirado do mesmo ponto, com a mesma distância (abaixo de 1 km), o
      pedaço vira o nome inteiro.
-   - **Longe daqui:** chaves de portais a mais de 5 km, sem portal com esse nome no app, ficam num grupo
-     recolhido no fim, sem pedir decisão. Portal longe que já está cadastrado continua em "Já cadastrados"
-     quando o arredondamento da distância pelo jogo cabe na tolerância; muito longe (centenas de km) ele pode
-     aparecer em "Longe daqui".
+   - **Chaves sem portal no app:** todo nome lido que não tem portal com esse nome no app, nem provisório
+     candidato no anel, vira um **portal potencial** nesta seção (inclui as chaves de outras cidades, que antes
+     ficavam em "Longe daqui"). Cada nome aparece uma vez só: ou aqui ou em Pendentes.
+     - **Posição estimada:** com 3 ou mais prints tirados de 3 ou mais pontos espalhados (para chaves a km
+       de distância, pontos a uns 2 km um do outro), o app trilatera. Acima de 1 km a distância do jogo é
+       arredondada; o "erro ~X m" mostrado é 1,5× o erro esperado pela geometria e, em simulação, cobriu
+       cerca de 97% dos casos. Só aparece com erro até 150 m. **➕ Cadastrar aqui** cria o portal na posição
+       estimada, com chaves e nível do print e a observação "posição estimada por N prints, erro ~X m;
+       conferir no Intel". **Ver no mapa** mostra os anéis e o círculo do erro. A caixa de seleção e
+       **Cadastrar selecionados** cadastram vários de uma vez (um desfazer só).
+     - **Falta posição:** mostra quantas observações e de quantos pontos, e quantos pontos faltam.
+       **📎 Cadastrar pelo link** abre "Colar link" com nome, chaves e nível do print. **📍 Marcar no mapa**
+       desenha os anéis (linha cheia: a distância; tracejadas: a tolerância); o próximo toque longo dentro
+       de um anel abre o formulário já com nome, chaves e nível. Fora de todos os anéis, o app pede
+       confirmação.
+     - **Nunca duplicar:**
+       - Nome igual a um portal do app (mesmo em outro lugar, mesmo com a posição errada) não entra na seção.
+         Pedaço do nome de um portal cadastrado também não. Nome que é começo de outro da lista é marcado
+         como provavelmente cortado, sem botão de cadastro.
+       - Portal do app dentro do erro da estimativa (mínimo 30 m): o nome fica fora do lote, aparece o aviso
+         e, para provisórios, **É este** (renomeia o provisório em vez de criar outro). Cadastrar mesmo assim
+         pede confirmação.
+       - Em qualquer cadastro novo, pelo formulário inclusive: nome igual a um portal existente pede
+         confirmação ("Nome repetido"), e outro portal a menos de 30 m também ("Portal perto").
+     - Todo cadastro novo entra no **↶ Desfazer**, que remove o portal.
 3. **Print de mapa:**
    - A IA marca a posição de cada nome na imagem.
    - O app acha escala e deslocamento entre o print e os portais cadastrados (rotação só se o mapa estiver
@@ -195,7 +216,8 @@ jogo, com confirmação um a um. Fica em **Ajustes → Nomear por print** e vem 
    - Dois nomes que só cabem no mesmo portal vão os dois para Pendentes, com aviso de conflito: nenhum ganha
      sozinho.
    - Chaves, nível e posição só mudam se você marcar. Mover pede confirmação.
-   - **↶ Desfazer** volta nomes, chaves, nível e posição. Editar, mover, tocar em 🔑 + / − e importar também
+   - **↶ Desfazer** volta nomes, chaves, nível e posição, e remove portais cadastrados depois. Cadastrar, editar,
+     mover, tocar em 🔑 + / − e importar também
      entram no desfazer, então ele volta exatamente a última ação.
    - Renomear não recalcula o plano. Mover mais de 30 m aparece no aviso de plano desatualizado.
 5. **Privacidade:**
