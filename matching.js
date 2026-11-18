@@ -690,6 +690,15 @@
    * km, a ponderada pelo arredondamento do jogo com erro esperado até 150 m.
    * cutOf: outro nome da lista que começa por este (provável nome cortado); a UI não oferece cadastro.
    */
+  /** Tirando cada observação (até 8), a trilateração das outras fica a até maxShift da estimativa com todas. */
+  function consistentWithout(obs, tri, maxShift, opts) {
+    var list = obs.slice(0, 8);
+    return list.every(function (_, i) {
+      var t = trilaterate(list.filter(function (__, j) { return j !== i; }), opts);
+      return !t || G.haversine(t.pos, tri.pos) <= maxShift;
+    });
+  }
+
   function unregisteredList(groups, keys, registered, suggestions, pending, farKeys, portals) {
     var skip = Object.create(null);
     registered.forEach(function (r) { skip[r.key] = true; });
@@ -701,6 +710,7 @@
       if (skip[k]) return;
       var obs = groups[k], nome = obs[obs.length - 1].nome;
       if (sameNamePortal(nome, portals)) return; // já existe com esse nome (talvez com a posição errada): nunca duplicar
+      if (isProvisional(nome)) return; // "BK 009", "Portal 07": nome do próprio app, não do jogo; nunca cadastrar com ele
       if (k.length >= 3 && portalKeys.some(function (pk) { return pk.length > k.length && pk.indexOf(k) === 0; })) return;
       var last = obs.slice().sort(function (a, b) { return (b.ts || 0) - (a.ts || 0); })[0];
       var u = { key: k, nome: last.nome, endereco: (obs.map(function (o) { return o.endereco; }).filter(Boolean)[0]) || null,
@@ -709,21 +719,26 @@
           return { lat: o.origem.lat, lng: o.origem.lng, raio_m: o.distancia_m, tol_m: Math.round(ringTol(o.distancia_m, o.origem.precisao, 0).tol + roundingErr(o.distancia_m)) };
         }) };
       if (obs.length >= 3 && u.origins >= 3) {
-        var tri = trilaterate(obs);
-        if (!trustedTri(tri)) {
+        var tri = trilaterate(obs), checked = false;
+        if (trustedTri(tri)) checked = u.origins >= 4 && consistentWithout(obs, tri, Math.max(30, tri.expectedError), {});
+        else {
           tri = trilaterate(obs, { all: true });
-          // com distâncias arredondadas, o erro real passa do esperado pela geometria em ~5% dos casos por até 1,4×
-          // (medido em simulação): o app mostra 1,5× como "erro ~X m", que cobre ~95%, e só aceita até 150 m
-          if (tri && tri.expectedError != null) tri.expectedError = Math.round(tri.expectedError * 1.5);
-          if (!(tri && tri.expectedError != null && tri.expectedError <= UNREG_MAX_ERR_M && tri.residual <= 2 * tri.sigma)) tri = null;
+          // Erro mostrado = 1,5× o esperado pela geometria (cobre ~97% com distâncias arredondadas, em simulação)
+          // + 3× o resíduo (uma leitura errada desloca a posição ~3× o resíduo que ela deixa). Resíduo acima de σ: recusa.
+          if (tri && tri.expectedError != null) tri.expectedError = Math.round(1.5 * tri.expectedError + 3 * tri.residual);
+          if (!(tri && tri.expectedError != null && tri.expectedError <= UNREG_MAX_ERR_M && tri.residual <= tri.sigma)) tri = null;
+          // com 4+ pontos dá para conferir: tirar qualquer um não pode mover a estimativa além do erro mostrado
+          else if (u.origins >= 4) { if (consistentWithout(obs, tri, tri.expectedError, { all: true })) checked = true; else tri = null; }
         }
-        if (tri) u.estimate = { lat: tri.pos.lat, lng: tri.pos.lng, residual: tri.residual, expectedError: tri.expectedError };
+        // com só 3 pontos, uma leitura errada pode não deixar rastro: o app avisa "sem conferência"
+        if (tri) u.estimate = { lat: tri.pos.lat, lng: tri.pos.lng, residual: tri.residual, expectedError: tri.expectedError, checked: checked };
       }
       out.push(u);
     });
     // nome que é começo de outro da lista: provável pedaço cortado do mesmo portal
     out.forEach(function (u) {
-      var longer = out.filter(function (v) { return v !== u && v.key.length > u.key.length && v.key.indexOf(u.key) === 0; })[0];
+      var longer = out.filter(function (v) { return v !== u && v.key.length > u.key.length && v.key.indexOf(u.key) === 0; })
+        .sort(function (a, b) { return b.key.length - a.key.length; })[0]; // o mais longo: o nome inteiro, não outro pedaço
       if (longer) u.cutOf = longer.nome;
     });
     return out.sort(function (a, b) { return (b.estimate ? 1 : 0) - (a.estimate ? 1 : 0) || a.nome.localeCompare(b.nome); });

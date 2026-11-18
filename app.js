@@ -2096,7 +2096,8 @@
   function registerUnreg(list) {
     var items = list.filter(function (u) { return u.estimate; }).map(function (u) {
       return { u: u, p: sanitizePortal({ id: newId(), nome: u.nome, lat: u.estimate.lat, lng: u.estimate.lng, nivel: u.nivel == null ? DEFAULT_LEVEL : u.nivel,
-        chaves: u.chaves || 0, observacao: 'posição estimada por ' + u.obs + ' prints, erro ~' + u.estimate.expectedError + ' m; conferir no Intel' }) };
+        chaves: u.chaves || 0, observacao: 'posição estimada por ' + u.obs + ' prints, erro ~' + u.estimate.expectedError + ' m' +
+          (u.estimate.checked ? '' : ', sem conferência') + '; conferir no Intel' }) };
     }).filter(function (x) { return x.p; });
     if (!items.length) return;
     var blocked = items.filter(function (x) { return FPMatch.sameNamePortal(x.p.nome, db.portals); });
@@ -2174,7 +2175,8 @@
   function unregRow(u) {
     var rk = unregRisk(u), li = el('li', { class: u.cutOf ? 'nm-cut' : null });
     var info = [u.chaves != null ? '🔑 ' + u.chaves : null, u.nivel != null ? 'L' + u.nivel : null,
-      u.estimate ? 'erro ~' + fmtDist(u.estimate.expectedError) : null, u.obs + ' observação(ões) de ' + u.origins + ' ponto(s)'].filter(Boolean).join(' · ');
+      u.estimate ? 'erro ~' + fmtDist(u.estimate.expectedError) : null, u.obs + ' observação(ões) de ' + u.origins + ' ponto(s)',
+      u.estimate && !u.estimate.checked ? 'sem conferência: com 3 pontos um print lido errado pode passar; um 4º ponto confere' : null].filter(Boolean).join(' · ');
     var head = [];
     var safe = u.estimate && !u.cutOf && !rk.same && !rk.near.length;
     if (safe) {

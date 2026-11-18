@@ -5,7 +5,7 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 ## [1.11.0] — 2026-11-18
 ### Adicionado
 - **Nomear por print → Chaves sem portal no app:** o nome lido que não casa com nenhum portal do app vira um "portal potencial" para cadastrar. A seção substitui "Longe daqui".
-  - **Posição estimada** (3+ prints de 3+ pontos espalhados): trilateração que também usa as distâncias arredondadas do jogo (≥ 1 km), com peso pelo arredondamento. O erro mostrado é 1,5× o esperado pela geometria (cobriu ~97% em simulação); só com erro até 150 m. **➕ Cadastrar aqui**, **Ver no mapa** e seleção múltipla com **Cadastrar selecionados**.
+  - **Posição estimada** (3+ prints de 3+ pontos espalhados): trilateração que também usa as distâncias arredondadas do jogo (≥ 1 km), com peso pelo arredondamento. O erro mostrado é 1,5× o esperado pela geometria mais 3× o resíduo (cobriu 99% em simulação com leituras certas); só com erro até 150 m. Com 4+ pontos, conferência deixando um de fora; com 3, a estimativa fica marcada "sem conferência" (um print lido errado pode passar). **➕ Cadastrar aqui**, **Ver no mapa** e seleção múltipla com **Cadastrar selecionados**.
   - **Falta posição:** dica de quantos pontos faltam, **📎 Cadastrar pelo link** (com chaves e nível do print) e **📍 Marcar no mapa** (anéis no mapa; o toque longo dentro de um anel abre o formulário preenchido; fora dos anéis pede confirmação).
   - `matching.js`: `matchKeyList` devolve `unregistered` (`far` continua, por compatibilidade); `trilaterate(obs, { all: true })`.
 ### Alterado
@@ -15,7 +15,7 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
   - o formulário de portal novo pede confirmação para nome igual a um existente ("Nome repetido"), além da regra de 30 m que já existia.
 - **↶ Desfazer remove portais cadastrados** depois do último passo: cadastro pelo formulário, lista de links, importação e Nomear por print.
 - Um nome pendente sem candidato aparece só em "Chaves sem portal no app", não também em Pendentes.
-- 10 testes novos (`tests/unregistered.test.js`).
+- 21 testes novos (`tests/unregistered.test.js`). Nome provisório lido do print ("BK 009") nunca vira portal potencial; `cutOf` aponta para o nome mais longo.
 
 ## [1.10.2] — 2026-11-16
 ### Alterado

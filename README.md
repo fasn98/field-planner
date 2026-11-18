@@ -176,8 +176,11 @@ jogo, com confirmação um a um. Fica em **Ajustes → Nomear por print** e vem 
      ficavam em "Longe daqui"). Cada nome aparece uma vez só: ou aqui ou em Pendentes.
      - **Posição estimada:** com 3 ou mais prints tirados de 3 ou mais pontos espalhados (para chaves a km
        de distância, pontos a uns 2 km um do outro), o app trilatera. Acima de 1 km a distância do jogo é
-       arredondada; o "erro ~X m" mostrado é 1,5× o erro esperado pela geometria e, em simulação, cobriu
-       cerca de 97% dos casos. Só aparece com erro até 150 m. **➕ Cadastrar aqui** cria o portal na posição
+       arredondada; o "erro ~X m" mostrado é 1,5× o erro esperado pela geometria mais 3× o resíduo e, em
+       simulação com leituras certas, cobriu 99% dos casos. Só aparece com erro até 150 m.
+       Com 4 ou mais pontos o app confere: tirar qualquer print não pode mover a estimativa além do erro
+       mostrado, senão não estima. **Com só 3 pontos não há conferência:** um print lido errado (100 m ou
+       mais) ainda passa em 3% a 20% dos casos, com a posição errada, e o app marca "sem conferência". **➕ Cadastrar aqui** cria o portal na posição
        estimada, com chaves e nível do print e a observação "posição estimada por N prints, erro ~X m;
        conferir no Intel". **Ver no mapa** mostra os anéis e o círculo do erro. A caixa de seleção e
        **Cadastrar selecionados** cadastram vários de uma vez (um desfazer só).

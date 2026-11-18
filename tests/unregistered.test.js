@@ -118,7 +118,7 @@ test('3 origens, uma observação com distância 1500 m errada (resíduo alto): 
   assert.equal(uOf(M.matchKeyList(obs, portals), 'Incoerente').estimate, undefined);
 });
 
-test('estimativa aceita com uma observação 300 m errada: o erro mostrado cobre o erro real', { todo: 'defeito: expectedError (matching.js:522) vem só da geometria e ignora o resíduo; com +300 m numa observação o app mostra "erro ~83 m" e o erro real é ~284 m' }, () => {
+test('estimativa aceita com uma observação 300 m errada: o erro mostrado cobre o erro real', () => {
   const obs = tres('Torta', guapituba, [o0, oN, oE]);
   obs[2].distancia_m += 300;
   const u = uOf(M.matchKeyList(obs, portals), 'Torta');
@@ -161,12 +161,12 @@ test('cutOf com 3 níveis: cada pedaço aponta para um nome mais longo e o intei
   assert.ok(['Parque Gua', 'Parque Guapituba'].includes(uOf(r, 'Par').cutOf));
 });
 
-test('cutOf com 3 níveis: o pedaço mais curto aponta para o nome inteiro, não para o intermediário', { todo: 'matching.js:726 pega o primeiro mais longo na ordem da lista: "Par" aponta para "Parque Gua" (também cortado) e não para "Parque Guapituba"' }, () => {
+test('cutOf com 3 níveis: o pedaço mais curto aponta para o nome inteiro, não para o intermediário', () => {
   const obs = [obsAt('Par', at(0, 300000), o0, 1, 1), obsAt('Parque Gua', at(0, 300400), o0, 1, 1), obsAt('Parque Guapituba', at(0, 300800), o0, 1, 1)];
   assert.equal(uOf(M.matchKeyList(obs, portals), 'Par').cutOf, 'Parque Guapituba');
 });
 
-test('nome provisório lido do print, sem portal no app: não vira portal potencial', { todo: 'a confirmar com o dono: "BK 009 - R. Foo" (nome gerado pelo app, não do jogo) sem portal igual entra em unregistered e pode ser cadastrado com nome provisório (matching.js:703 só compara com portais existentes)' }, () => {
+test('nome provisório lido do print, sem portal no app: não vira portal potencial', () => {
   const r = M.matchKeyList([obsAt('BK 009 - R. Foo', at(900, 900), o0, 1, 1)], portals);
   assert.equal(uOf(r, 'BK 009 - R. Foo'), undefined);
 });
