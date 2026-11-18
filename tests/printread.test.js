@@ -122,6 +122,9 @@ test('a chave da API nunca aparece no export JSON', () => {
   assert.ok(!out.includes('SEGREDO'));
   assert.ok(!/apikey|api_key|apiKey/i.test(out));
   assert.deepEqual(Object.keys(FP.exportPayload(db)).sort(), ['app', 'blockers', 'coveredManual', 'done', 'excluded', 'exportedAt', 'plan', 'portals', 'settings', 'version']);
+  // observações só com escolha explícita; nem assim a chave entra
+  const withObs = JSON.stringify(FP.exportPayload(db, 1, { observacoes: [{ nome: 'P', distancia_m: 10, origem: { lat: 0, lng: 0 }, ts: 1, apiKey: R.loadKey(st) }] }));
+  assert.ok(!withObs.includes('SEGREDO'));
   R.clearKey(st);
   assert.equal(R.loadKey(st), '');
 });

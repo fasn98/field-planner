@@ -456,6 +456,55 @@
     return out;
   }
 
+  /**
+   * Observação vinda de fora (JSON importado): lista fechada de campos, tipos e faixas conferidos.
+   * { nome, endereco, distancia_m, nivel, chaves, origem: {lat, lng, precisao}, ts } ou null.
+   */
+  function sanitizeObservation(o) {
+    if (!o || typeof o !== 'object' || !o.origem || typeof o.origem !== 'object') return null;
+    var nome = typeof o.nome === 'string' ? o.nome.trim().slice(0, 80) : '';
+    var d = Number(o.distancia_m), lat = Number(o.origem.lat), lng = Number(o.origem.lng);
+    if (!nome || !isFinite(d) || d < 0 || d > 2e7 || !isFinite(lat) || !isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+    var int = function (v, lo, hi) { var n = Math.round(Number(v)); return v == null || v === '' || !isFinite(n) ? null : Math.max(lo, Math.min(hi, n)); };
+    var acc = Number(o.origem.precisao), ts = Number(o.ts);
+    return {
+      nome: nome, endereco: typeof o.endereco === 'string' && o.endereco.trim() ? o.endereco.trim().slice(0, 160) : null,
+      distancia_m: d, nivel: int(o.nivel, 1, 8), chaves: int(o.chaves, 0, 999),
+      origem: { lat: lat, lng: lng, precisao: isFinite(acc) && acc >= 0 ? Math.min(acc, 10000) : 0 },
+      ts: isFinite(ts) && ts > 0 ? ts : 0
+    };
+  }
+
+  /**
+   * Junta observações de outro aparelho às deste: valida cada uma, descarta repetidas (isDuplicateObs) e guarda
+   * no máximo `max` (as mais recentes por ts). Devolve { list, added, invalid }.
+   */
+  function mergeObservations(mine, incoming, max, now) {
+    max = max || 2000;
+    now = now || Date.now();
+    var list = (mine || []).slice(), added = 0, invalid = 0;
+    // índice por nome: comparar só com as observações do mesmo nome (o arquivo pode ter dezenas de milhares)
+    var idx = Object.create(null);
+    list.forEach(function (o) { var k = normName(o.nome); (idx[k] = idx[k] || []).push(o); });
+    var inc = Array.isArray(incoming) ? incoming.slice(-max) : []; // nunca mais que o limite entra na conta
+    if (Array.isArray(incoming) && incoming.length > inc.length) invalid += incoming.length - inc.length;
+    inc.forEach(function (raw) {
+      var o = sanitizeObservation(raw);
+      if (!o) { invalid++; return; }
+      if (o.ts > now) o.ts = now; // hora no futuro não pode empurrar as daqui para fora do limite
+      var k = normName(o.nome), b = idx[k] = idx[k] || [];
+      if (b.some(function (x) { return isDuplicateObs(x, o); })) return;
+      b.push(o); list.push(o); added++;
+    });
+    if (list.length > max) {
+      var keep = list.slice().sort(function (a, b) { return (a.ts || 0) - (b.ts || 0); }).slice(-max);
+      var kept = new Set(keep);
+      added = list.filter(function (o, i) { return i >= (mine || []).length && kept.has(o); }).length; // só as que ficaram
+      list = keep;
+    }
+    return { list: list, added: added, invalid: invalid };
+  }
+
   /** Quantas origens distintas (≥ 30 m entre si) uma lista de observações tem. */
   function distinctOrigins(obs) {
     var seen = [];
@@ -827,6 +876,6 @@
     portalUncertainty: portalUncertainty, sameNamePortal: sameNamePortal, SAME_NAME: SAME_NAME,
     streetTokens: streetTokens, streetCompatible: streetCompatible, isProvisional: isProvisional,
     hungarian: hungarian, fitSimilarity: fitSimilarity, matchMap: matchMap, ringTol: ringTol, trilaterate: trilaterate,
-    matchKeyList: matchKeyList, bulkDuplicates: bulkDuplicates, trustedTri: trustedTri, isDuplicateObs: isDuplicateObs, mergeTruncated: mergeTruncated, FAR_AWAY_M: FAR_AWAY_M, UNREG_MAX_ERR_M: UNREG_MAX_ERR_M, roundingErr: roundingErr, portalStreetKnown: portalStreetKnown, addressHasStreet: addressHasStreet, matchSingle: matchSingle, distinctOrigins: distinctOrigins, localFrame: localFrame
+    matchKeyList: matchKeyList, bulkDuplicates: bulkDuplicates, trustedTri: trustedTri, isDuplicateObs: isDuplicateObs, sanitizeObservation: sanitizeObservation, mergeObservations: mergeObservations, mergeTruncated: mergeTruncated, FAR_AWAY_M: FAR_AWAY_M, UNREG_MAX_ERR_M: UNREG_MAX_ERR_M, roundingErr: roundingErr, portalStreetKnown: portalStreetKnown, addressHasStreet: addressHasStreet, matchSingle: matchSingle, distinctOrigins: distinctOrigins, localFrame: localFrame
   };
 });

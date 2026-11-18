@@ -233,7 +233,11 @@ jogo, com confirmação um a um. Fica em **Ajustes → Nomear por print** e vem 
 5. **Privacidade:**
    - As imagens ficam só em memória, nesta tela. **Limpar imagens desta tela** descarta tudo.
    - Um print compartilhado passa alguns instantes num cache do service worker e é apagado quando o app o lê.
-   - As observações ficam só neste aparelho (**Esquecer observações** apaga) e não entram no export.
+   - As observações ficam neste aparelho (**Esquecer observações** apaga). Elas só entram no export JSON se
+     você confirmar na hora de exportar ("Incluir observações?"), porque guardam a posição, a data e a hora de
+     cada print. Importar esse arquivo no outro aparelho também pergunta antes (importe só se forem suas:
+     observações de outro jogador não podem ser guardadas) e junta as leituras dos dois, sem repetir; a
+     trilateração passa a usar todas. A chave da API e as imagens nunca entram no export.
    - **Apagar todos os dados** apaga também a chave da API, as preferências, as observações (com as posições
      de onde você tirou cada print) e o cache de compartilhados.
 
