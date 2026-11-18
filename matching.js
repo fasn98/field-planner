@@ -752,6 +752,49 @@
     return out.sort(function (a, b) { return (b.estimate ? 1 : 0) - (a.estimate ? 1 : 0) || a.nome.localeCompare(b.nome); });
   }
 
+  /**
+   * Possíveis duplicatas numa lista de cadastros (importar lista de links), com a mesma regra dos outros cadastros:
+   *   nameApp: nome igual ao de um portal do app (em qualquer lugar);
+   *   nameRow: nome igual ao de uma linha anterior considerada;
+   *   nearApp: portal do app a menos de 30 m;          nearRow: linha anterior considerada a menos de 30 m.
+   * Nome provisório ("Portal 07", automático ou digitado) não conta como nome repetido. Linha com r.dup (já marcada
+   * como o mesmo portal, < 10 m) não recebe aviso de distância. consider(r): linhas que entram na conferência.
+   * Devolve, por linha, null ou [{ type, portal?, linha?, d? }].
+   */
+  function bulkDuplicates(rows, portals, consider) {
+    var seen = [], placed = [], NEAR = 30, BAND = 0.0005; // ~55 m em latitude: descarta rápido
+    consider = consider || function () { return true; };
+    return (rows || []).map(function (r) {
+      if (!r || r.erro || !consider(r)) return null;
+      var out = [], nome = String(r.nome || '').trim();
+      if (nome && !isProvisional(nome)) {
+        var same = sameNamePortal(nome, portals);
+        if (same) out.push({ type: 'nameApp', portal: same });
+        else {
+          var prev = seen.filter(function (x) { return nameSimilarity(nome, x.nome) >= SAME_NAME; })[0];
+          if (prev) out.push({ type: 'nameRow', linha: prev.linha });
+        }
+        seen.push({ nome: nome, linha: r.linha });
+      }
+      if (!r.dup) {
+        var best = null, bd = Infinity;
+        portals.forEach(function (p) {
+          if (Math.abs(p.lat - r.lat) > BAND) return;
+          var d = G.haversine(p, r);
+          if (d < bd) { bd = d; best = p; }
+        });
+        if (best && bd < NEAR) out.push({ type: 'nearApp', portal: best, d: bd });
+        else {
+          var pr = null, pd = Infinity;
+          placed.forEach(function (x) { if (Math.abs(x.lat - r.lat) <= BAND) { var d = G.haversine(x, r); if (d < NEAR && d < pd) { pd = d; pr = x; } } });
+          if (pr) out.push({ type: 'nearRow', linha: pr.linha, d: pd });
+        }
+        placed.push({ lat: r.lat, lng: r.lng, linha: r.linha });
+      }
+      return out.length ? out : null;
+    });
+  }
+
   /** Posição trilaterada confiável: resíduo e erro esperado pela geometria até 15 m. */
   function trustedTri(t) {
     return !!(t && t.residual <= TRILAT_MAX_RES_M && t.expectedError != null && t.expectedError <= TRILAT_MAX_SIGMA_M);
@@ -784,6 +827,6 @@
     portalUncertainty: portalUncertainty, sameNamePortal: sameNamePortal, SAME_NAME: SAME_NAME,
     streetTokens: streetTokens, streetCompatible: streetCompatible, isProvisional: isProvisional,
     hungarian: hungarian, fitSimilarity: fitSimilarity, matchMap: matchMap, ringTol: ringTol, trilaterate: trilaterate,
-    matchKeyList: matchKeyList, trustedTri: trustedTri, isDuplicateObs: isDuplicateObs, mergeTruncated: mergeTruncated, FAR_AWAY_M: FAR_AWAY_M, UNREG_MAX_ERR_M: UNREG_MAX_ERR_M, roundingErr: roundingErr, portalStreetKnown: portalStreetKnown, addressHasStreet: addressHasStreet, matchSingle: matchSingle, distinctOrigins: distinctOrigins, localFrame: localFrame
+    matchKeyList: matchKeyList, bulkDuplicates: bulkDuplicates, trustedTri: trustedTri, isDuplicateObs: isDuplicateObs, mergeTruncated: mergeTruncated, FAR_AWAY_M: FAR_AWAY_M, UNREG_MAX_ERR_M: UNREG_MAX_ERR_M, roundingErr: roundingErr, portalStreetKnown: portalStreetKnown, addressHasStreet: addressHasStreet, matchSingle: matchSingle, distinctOrigins: distinctOrigins, localFrame: localFrame
   };
 });

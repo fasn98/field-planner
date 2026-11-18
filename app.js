@@ -1413,35 +1413,16 @@
     renderBulk();
   }
 
-  /**
-   * Avisos de possível duplicata por linha (mesma regra do formulário de portal novo):
-   * nome igual ao de um portal do app ou ao de outra linha considerada, e portal do app a menos de 30 m.
-   * Nome provisório ("Portal 07", inclusive o automático das linhas sem nome) não conta como nome repetido.
-   */
+  /** Avisos de possível duplicata por linha (regra pura em FPMatch.bulkDuplicates), em texto para a prévia. */
   function bulkWarnings(rows, consider) {
-    var seen = [];
-    return rows.map(function (r) {
-      if (r.erro || !consider(r)) return null;
-      var out = [], nome = String(r.nome || '').trim();
-      if (nome && !FPMatch.isProvisional(nome)) {
-        var same = FPMatch.sameNamePortal(nome, db.portals);
-        if (same) out.push('nome já cadastrado: ' + same.nome);
-        else {
-          var prev = seen.filter(function (x) { return FPMatch.nameSimilarity(nome, x.nome) >= FPMatch.SAME_NAME; })[0];
-          if (prev) out.push('mesmo nome da linha ' + prev.linha);
-        }
-        seen.push({ nome: nome, linha: r.linha });
-      }
-      if (!r.dup) {
-        var best = null, bd = Infinity;
-        db.portals.forEach(function (p) {
-          if (Math.abs(p.lat - r.lat) > 0.0005) return; // ~55 m em latitude: descarta rápido
-          var d = FPGeo.haversine(p, r);
-          if (d < bd) { bd = d; best = p; }
-        });
-        if (best && bd < 30) out.push('portal perto: ' + best.nome + ' a ' + fmtDist(bd));
-      }
-      return out.length ? out.join(' · ') : null;
+    return FPMatch.bulkDuplicates(rows, db.portals, consider).map(function (list) {
+      if (!list) return null;
+      return list.map(function (w) {
+        if (w.type === 'nameApp') return 'nome já cadastrado: ' + w.portal.nome;
+        if (w.type === 'nameRow') return 'mesmo nome da linha ' + w.linha;
+        if (w.type === 'nearApp') return 'portal perto: ' + w.portal.nome + ' a ' + fmtDist(w.d);
+        return 'perto da linha ' + w.linha + ' (' + fmtDist(w.d) + ')';
+      }).join(' · ');
     });
   }
 

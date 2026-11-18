@@ -5,10 +5,11 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 ## [1.11.1] — 2026-11-18
 ### Alterado
 - **Importar lista de links confere nome, além de distância** (a mesma regra de todas as formas de cadastro):
-  - entram desmarcadas, com aviso, as linhas com nome igual ao de um portal do app ou ao de uma linha anterior da lista, e as que ficam a menos de 30 m de um portal do app (antes só a menos de 10 m);
+  - entram desmarcadas, com aviso, as linhas com nome igual ao de um portal do app ou ao de uma linha anterior da lista, e as que ficam a menos de 30 m de um portal do app ou de outra linha (antes só a menos de 10 m);
   - `Portal NN`, automático das linhas sem nome ou digitado, não conta como nome repetido;
   - o aviso é refeito ao editar o nome na prévia;
-  - marcar de novo uma linha com aviso e importar pede confirmação; cancelar volta à prévia sem perder nada.
+  - marcar de novo uma linha com aviso e importar pede confirmação; cancelar volta à prévia sem perder nada;
+  - a regra é uma função pura, `bulkDuplicates` em `matching.js`, com 9 testes (`tests/bulk-duplicates.test.js`).
 - Decisão registrada: geocodificar o endereço do print (ADR-0004) foi **rejeitada** pelo dono; a política de conformidade não muda.
 
 ## [1.11.0] — 2026-11-18
