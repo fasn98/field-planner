@@ -193,12 +193,15 @@ jogo, com confirmação um a um. Fica em **Ajustes → Nomear por print** e vem 
        - Nome igual a um portal do app (mesmo em outro lugar, mesmo com a posição errada) não entra na seção.
          Pedaço do nome de um portal cadastrado também não. Nome que é começo de outro da lista é marcado
          como provavelmente cortado, sem botão de cadastro.
-       - Portal do app dentro do erro da estimativa (mínimo 30 m): o nome fica fora do lote, aparece o aviso
+       - Portal do app cujo nome é começo do lido ("Igreja Nossa Senhora" × "Igreja Nossa Senhora da
+         Conceição"): aviso, fora do lote. Duas grafias do mesmo nome no lote bloqueiam o lote.
+       - Portal do app dentro do erro da estimativa (mais a incerteza da posição dele; mínimo 30 m): o nome fica fora do lote, aparece o aviso
          e, para provisórios, **É este** (renomeia o provisório em vez de criar outro). Cadastrar mesmo assim
          pede confirmação.
        - Em qualquer cadastro novo, pelo formulário inclusive: nome igual a um portal existente pede
          confirmação ("Nome repetido"), e outro portal a menos de 30 m também ("Portal perto").
-     - Todo cadastro novo entra no **↶ Desfazer**, que remove o portal.
+     - Todo cadastro novo entra no **↶ Desfazer**, que remove o portal (o aviso diz quantos). Importar o JSON de
+       outro aparelho não duplica portal no mesmo lugar e com o mesmo nome.
 3. **Print de mapa:**
    - A IA marca a posição de cada nome na imagem.
    - O app acha escala e deslocamento entre o print e os portais cadastrados (rotação só se o mapa estiver

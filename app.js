@@ -1219,9 +1219,12 @@
         if (semNome) p.nome = ex.nome;
         Object.assign(ex, p); updated++; return;
       }
+      var nb0 = near.find(p);
       if (!hasId) {
         // sem id (arquivo feito à mão): mesmo lugar = mesmo portal; mantém chaves/nível já ajustados
-        if (near.find(p)) { kept++; return; }
+        if (nb0) { kept++; return; }
+      } else if (nb0 && !semNome && FPMatch.nameSimilarity(nb0.nome, p.nome) >= FPMatch.SAME_NAME) {
+        kept++; return; // id de outro aparelho, mesmo lugar e mesmo nome: é o mesmo portal, não duplica
       }
       if (semNome) p.nome = 'Portal ' + String(autoN++).padStart(2, '0'); // só quem entra de fato consome número
       db.portals.push(p); near.add(p); addedIds.push(p.id); added++;
@@ -1660,6 +1663,7 @@
     snap.portals.forEach(function (v) { keep[v[0]] = true; });
     db.portals.forEach(function (p) { if (!keep[p.id]) { gone[p.id] = true; nGone++; } });
     if (nGone) removePortals(gone);
+    lastKeyUndo = null; // o próximo 🔑 empilha o seu próprio passo (senão um ↶ depois dele voltaria dois passos)
     db.done = snap.done; db.excluded = snap.excluded; db.blockers = snap.blockers; db.coveredManual = snap.coveredManual;
     snap.portals.forEach(function (v) {
       var p = portalById(v[0]);
@@ -1671,6 +1675,7 @@
     autoOptimize('desfeito');
     renderAll();
     if (typeof refreshSuggestions === 'function') { refreshSuggestions(); renderNameBox(); }
+    if (nGone) toast('Desfeito: ' + nGone + ' portal(is) cadastrado(s) no último passo removido(s)', 5000);
   }
   $('#fUndo').addEventListener('click', undoLast);
   $('#fRecalc').addEventListener('click', function () { manualOptimize('recalculado manualmente'); });
@@ -2085,11 +2090,15 @@
     var same = FPMatch.sameNamePortal(u.nome, db.portals);
     var near = [];
     if (u.estimate) {
-      var r = Math.max(30, u.estimate.expectedError || 0);
-      db.portals.forEach(function (p) { var d = FPGeo.haversine(p, u.estimate); if (d <= r) near.push({ p: p, d: d }); });
+      // erro da estimativa + incerteza da posição cadastrada (20 m se estimada, 5 m se confirmada); mínimo 30 m
+      db.portals.forEach(function (p) {
+        var d = FPGeo.haversine(p, u.estimate);
+        if (d <= Math.max(30, (u.estimate.expectedError || 0) + FPMatch.portalUncertainty(p))) near.push({ p: p, d: d });
+      });
       near.sort(function (a, b) { return a.d - b.d; });
     }
-    return { same: same, near: near, radius: u.estimate ? Math.max(30, u.estimate.expectedError || 0) : 0 };
+    var maybe = u.maybeSame ? portalById(u.maybeSame) : null;
+    return { same: same, near: near, maybe: maybe, radius: u.estimate ? Math.max(30, u.estimate.expectedError || 0) : 0 };
   }
 
   /** Cadastra na posição estimada. Nome já cadastrado bloqueia; portal dentro do erro, ou dois do lote perto um do outro, pedem confirmação. */
@@ -2100,9 +2109,13 @@
           (u.estimate.checked ? '' : ', sem conferência') + '; conferir no Intel' }) };
     }).filter(function (x) { return x.p; });
     if (!items.length) return;
-    var blocked = items.filter(function (x) { return FPMatch.sameNamePortal(x.p.nome, db.portals); });
+    // nome igual a um portal do app, ou a outro item do mesmo lote (duas grafias lidas do mesmo portal): bloqueia
+    var blocked = items.filter(function (x, i) {
+      return FPMatch.sameNamePortal(x.p.nome, db.portals) ||
+        items.some(function (y, j) { return j !== i && FPMatch.nameSimilarity(x.p.nome, y.p.nome) >= FPMatch.SAME_NAME; });
+    });
     if (blocked.length) {
-      toastError('Já existe portal com o nome ' + blocked.map(function (x) { return '“' + x.p.nome + '”'; }).join(', ') + '. Nada foi cadastrado.');
+      toastError('Nome repetido (no app ou no próprio lote): ' + blocked.map(function (x) { return '“' + x.p.nome + '”'; }).join(', ') + '. Nada foi cadastrado; cadastre um por vez.');
       refreshNaming();
       return;
     }
@@ -2110,9 +2123,11 @@
     items.forEach(function (x, i) {
       var rk = unregRisk(x.u);
       if (rk.near.length) warn.push('“' + rk.near[0].p.nome + '” está a ' + fmtDist(rk.near[0].d) + ' de “' + x.p.nome + '” (erro da estimativa ~' + fmtDist(rk.radius) + ')');
+      if (rk.maybe) warn.push('“' + rk.maybe.nome + '” (a ' + fmtDist(FPGeo.haversine(rk.maybe, x.p)) + ') pode ser “' + x.p.nome + '” com o nome cortado no app');
       items.slice(i + 1).forEach(function (y) {
         var d = FPGeo.haversine(x.p, y.p);
-        if (d <= Math.max(30, x.u.estimate.expectedError, y.u.estimate.expectedError)) warn.push('“' + x.p.nome + '” e “' + y.p.nome + '” ficam a ' + fmtDist(d) + ' um do outro');
+        // duas estimativas do mesmo portal podem ficar até a soma dos dois erros uma da outra
+        if (d <= Math.max(30, x.u.estimate.expectedError + y.u.estimate.expectedError)) warn.push('“' + x.p.nome + '” e “' + y.p.nome + '” ficam a ' + fmtDist(d) + ' um do outro');
       });
     });
     var go = function () {
@@ -2159,7 +2174,7 @@
   $('#ringClose').addEventListener('click', endRings);
   function ringPick(ll) {
     var u = ringMark.u, p = { lat: ll.lat, lng: ll.lng };
-    var inside = u.rings.some(function (r) { return Math.abs(FPGeo.haversine(r, p) - r.raio_m) <= r.tol_m; });
+    var inside = u.rings.every(function (r) { return Math.abs(FPGeo.haversine(r, p) - r.raio_m) <= r.tol_m; });
     var open = function () {
       endRings();
       openPortalDlg(null, p, { nome: u.nome }); // o salvar confere nome repetido e portal a < 30 m
@@ -2168,7 +2183,7 @@
       f.observacao.value = 'posição marcada no mapa dentro do anel de ' + u.obs + ' print(s); conferir no Intel';
     };
     if (inside) { open(); return; }
-    confirmDialog('Fora dos anéis', 'Esse ponto fica fora de todos os anéis de distância de “' + u.nome + '”: pelos prints, o portal não está aí. Cadastrar aqui mesmo assim?')
+    confirmDialog('Fora dos anéis', 'Esse ponto fica fora de ' + (u.rings.length > 1 ? 'pelo menos um dos anéis' : 'o anel') + ' de distância de “' + u.nome + '”: pelos prints, o portal não está aí. Cadastrar aqui mesmo assim?')
       .then(function (ok) { if (ok) open(); });
   }
 
@@ -2178,7 +2193,7 @@
       u.estimate ? 'erro ~' + fmtDist(u.estimate.expectedError) : null, u.obs + ' observação(ões) de ' + u.origins + ' ponto(s)',
       u.estimate && !u.estimate.checked ? 'sem conferência: com 3 pontos um print lido errado pode passar; um 4º ponto confere' : null].filter(Boolean).join(' · ');
     var head = [];
-    var safe = u.estimate && !u.cutOf && !rk.same && !rk.near.length;
+    var safe = u.estimate && !u.cutOf && !rk.same && !rk.near.length && !rk.maybe;
     if (safe) {
       var cb = el('input', { type: 'checkbox', 'aria-label': 'Selecionar ' + u.nome });
       cb.checked = !!nm.unregSel[u.key];
@@ -2202,6 +2217,8 @@
       return li;
     }
     var row = el('div', { class: 'row' });
+    if (rk.maybe) li.appendChild(el('div', { class: 'small nm-conflict', text: '⚠ “' + rk.maybe.nome + '” (a ' +
+      fmtDist(FPGeo.haversine(rk.maybe, u.estimate || u.rings[0])) + (u.estimate ? '' : ' do print') + ') pode ser este portal, com o nome cortado no app. Se for, renomeie aquele em Portais.' }));
     if (u.estimate) {
       if (rk.near.length) {
         li.appendChild(el('div', { class: 'small nm-conflict', text: '⚠ ' + rk.near.slice(0, 3).map(function (n) { return '“' + n.p.nome + '” a ' + fmtDist(n.d); }).join(', ') +
@@ -2241,7 +2258,7 @@
     var noPos = keyUnreg.filter(function (u) { return !u.estimate || u.cutOf; });
     if (est.length) {
       box.appendChild(el('div', { class: 'small', text: 'Posição estimada (' + est.length + ')' }));
-      var sel = est.filter(function (u) { var rk = unregRisk(u); return nm.unregSel[u.key] && !rk.same && !rk.near.length; });
+      var sel = est.filter(function (u) { var rk = unregRisk(u); return nm.unregSel[u.key] && !rk.same && !rk.near.length && !rk.maybe; });
       var batch = el('button', { class: 'btn sm', text: 'Cadastrar selecionados (' + sel.length + ')', onclick: function () { registerUnreg(sel); } });
       batch.disabled = !sel.length;
       box.appendChild(el('div', { class: 'row small' }, [batch]));

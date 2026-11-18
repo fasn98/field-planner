@@ -685,7 +685,8 @@
    * Chaves sem portal no app: nenhum portal com o mesmo nome (SAME_NAME, em qualquer lugar), nenhum portal cujo nome
    * comece por este (nome cortado de um cadastrado) e nenhum candidato provisório no anel (esses são renomeação, em
    * Pendentes). Inclui os que vão para `far`.
-   *   { key, nome, endereco, chaves, nivel, obs, origins, rings: [{lat,lng,raio_m,tol_m}], estimate?, cutOf? }
+   *   { key, nome, endereco, chaves, nivel, obs, origins, rings: [{lat,lng,raio_m,tol_m}], estimate?, cutOf?, maybeSame? }
+   * maybeSame: id de um portal do app cujo nome é começo deste (talvez o mesmo, com o nome cortado no app).
    * estimate só com 3+ observações de 3+ origens e trilateração confiável: a fina (trustedTri) ou, com anéis de
    * km, a ponderada pelo arredondamento do jogo com erro esperado até 150 m.
    * cutOf: outro nome da lista que começa por este (provável nome cortado); a UI não oferece cadastro.
@@ -711,17 +712,24 @@
       var obs = groups[k], nome = obs[obs.length - 1].nome;
       if (sameNamePortal(nome, portals)) return; // já existe com esse nome (talvez com a posição errada): nunca duplicar
       if (isProvisional(nome)) return; // "BK 009", "Portal 07": nome do próprio app, não do jogo; nunca cadastrar com ele
+      // nome lido que é começo de um cadastrado: pedaço cortado daquele portal, fora
       if (k.length >= 3 && portalKeys.some(function (pk) { return pk.length > k.length && pk.indexOf(k) === 0; })) return;
       var last = obs.slice().sort(function (a, b) { return (b.ts || 0) - (a.ts || 0); })[0];
+      // cadastrado cujo nome é começo do lido ("Igreja Nossa Senhora" × "… da Conceição"): pode ser o mesmo portal
+      // com o nome cortado no app; não some da lista ("Mural" e "Mural Natural" podem ser dois), mas vira risco
+      var maybeIdx = -1;
+      portalKeys.forEach(function (pk, i) { if (maybeIdx < 0 && pk.length >= 3 && k.length > pk.length && k.indexOf(pk) === 0) maybeIdx = i; });
       var u = { key: k, nome: last.nome, endereco: (obs.map(function (o) { return o.endereco; }).filter(Boolean)[0]) || null,
         chaves: last.chaves, nivel: last.nivel, obs: obs.length, origins: distinctOrigins(obs), far: !!farKeys[k],
         rings: obs.map(function (o) {
           return { lat: o.origem.lat, lng: o.origem.lng, raio_m: o.distancia_m, tol_m: Math.round(ringTol(o.distancia_m, o.origem.precisao, 0).tol + roundingErr(o.distancia_m)) };
         }) };
+      if (maybeIdx >= 0) u.maybeSame = portals[maybeIdx].id;
       if (obs.length >= 3 && u.origins >= 3) {
         var tri = trilaterate(obs), checked = false;
-        if (trustedTri(tri)) checked = u.origins >= 4 && consistentWithout(obs, tri, Math.max(30, tri.expectedError), {});
-        else {
+        if (trustedTri(tri)) {
+          if (u.origins >= 4) { if (consistentWithout(obs, tri, Math.max(30, tri.expectedError), {})) checked = true; else tri = null; }
+        } else {
           tri = trilaterate(obs, { all: true });
           // Erro mostrado = 1,5× o esperado pela geometria (cobre ~97% com distâncias arredondadas, em simulação)
           // + 3× o resíduo (uma leitura errada desloca a posição ~3× o resíduo que ela deixa). Resíduo acima de σ: recusa.

@@ -177,3 +177,20 @@ test('nome provisório lido do print que já existe no app (mesmo longe do anel)
   const r2 = M.matchKeyList([obsAt('BK 001', at(300, 0), o0, 1, 1)], portals);
   assert.equal(r2.unregistered.length, 0);
 });
+
+test('cadastrado cujo nome é começo do lido: continua na lista, marcado como talvez o mesmo (maybeSame)', () => {
+  const ps = portals.concat([Object.assign({ id: 'mural', nome: 'Mural', nivel: 1, chaves: 0, observacao: 'confirmado' }, at(-5000, 0))]);
+  const r = M.matchKeyList([obsAt('Mural Natural', at(6000, 6000), o0, 1, 1)], ps);
+  const u = r.unregistered.find(x => x.nome === 'Mural Natural');
+  assert.ok(u, 'não pode sumir: "Mural" e "Mural Natural" podem ser dois portais');
+  assert.equal(u.maybeSame, 'mural');
+});
+
+test('4+ pontos com uma leitura errada: a estimativa fina reprovada na conferência é descartada', () => {
+  const real = at(150, 120);
+  const os = [o0, Object.assign(at(300, 0), { precisao: 5 }), Object.assign(at(0, 300), { precisao: 5 }), Object.assign(at(300, 300), { precisao: 5 })];
+  const obs = os.map((o, i) => ({ nome: 'Quatro', endereco: null, distancia_m: Math.round(G.haversine(o, real) * 10) / 10 + (i === 3 ? 60 : 0), chaves: 1, nivel: 1, origem: o, ts: i }));
+  const u = M.matchKeyList(obs, []).unregistered.find(x => x.nome === 'Quatro');
+  assert.ok(!u.estimate || u.estimate.checked, JSON.stringify(u.estimate));
+  if (u.estimate) assert.ok(G.haversine(u.estimate, real) <= u.estimate.expectedError);
+});

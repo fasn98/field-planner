@@ -13,9 +13,12 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
   - nome igual a um portal do app (em qualquer lugar) ou pedaço do nome de um cadastrado não vira portal potencial; nome que é começo de outro da lista fica marcado como cortado, sem cadastro;
   - portal do app dentro do erro da estimativa (mínimo 30 m) tira o nome do lote, mostra aviso e, para provisórios, **É este** (renomeia em vez de criar); cadastrar mesmo assim pede confirmação;
   - o formulário de portal novo pede confirmação para nome igual a um existente ("Nome repetido"), além da regra de 30 m que já existia.
-- **↶ Desfazer remove portais cadastrados** depois do último passo: cadastro pelo formulário, lista de links, importação e Nomear por print.
+- **↶ Desfazer remove portais cadastrados** depois do último passo: cadastro pelo formulário, lista de links, importação e Nomear por print. O aviso diz quantos foram removidos.
+- **Importar JSON:** portal com id de outro aparelho, no mesmo lugar (< 30 m) e com o mesmo nome de um portal do app, não entra de novo (conta como mantido).
+- "Cadastrar selecionados" bloqueia o lote quando dois itens têm o mesmo nome (duas grafias lidas do mesmo portal); duas estimativas a menos da soma dos erros pedem confirmação. O raio de "pode ser o mesmo" soma a incerteza da posição cadastrada (20 m estimada, 5 m confirmada). Portal do app cujo nome é começo do lido ("Igreja Nossa Senhora" × "… da Conceição") vira aviso, fora do lote. "Marcar no mapa" pede confirmação fora de qualquer um dos anéis.
+- Corrigido: depois de um ↶, tocar 🔑 em menos de 10 s não empilhava passo, e o ↶ seguinte voltava dois passos.
 - Um nome pendente sem candidato aparece só em "Chaves sem portal no app", não também em Pendentes.
-- 21 testes novos (`tests/unregistered.test.js`). Nome provisório lido do print ("BK 009") nunca vira portal potencial; `cutOf` aponta para o nome mais longo.
+- 23 testes novos (`tests/unregistered.test.js`). Nome provisório lido do print ("BK 009") nunca vira portal potencial; `cutOf` aponta para o nome mais longo.
 
 ## [1.10.2] — 2026-11-16
 ### Alterado
