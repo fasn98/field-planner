@@ -22,8 +22,9 @@ Estas regras são **inegociáveis** e fazem parte do design, não são opções:
    falsifica posição. Sem GPS, ele planeja a partir do centro dos portais cadastrados — e diz isso na tela.
 4. **Nenhum dado de outros jogadores é armazenado.** Links bloqueadores guardam só os dois portais e a
    origem (`inimigo`/`aliado`) — nunca nome de agente. O campo de observação avisa para não registrar nomes.
-   Campos extras de arquivos importados, como cor ou facção, são descartados: só posição, nome, nível,
-   chaves e observação são guardados (`sanitizePortal`, `app.js:64`).
+   Campos extras de arquivos importados são descartados: só posição, nome, nível, chaves, observação e a
+   **facção do portal** (só a cor: `neutro`/`verde`/`azul`/`machina`, desde a v1.13.0, ADR-0005) são
+   guardados (`sanitizePortal` em `app.js`). Dono, agente e qualquer dado de jogador nunca entram.
 5. **Os portais entram por ação manual do usuário**: digitados, link colado, ou arquivo JSON/texto que ele
    mesmo prepara e importa. Isso inclui coordenadas que ele estima a partir de prints de mapa. O app nunca
    captura tela, não lê nem baixa nada de serviços do jogo e não automatiza a coleta: só lê o arquivo que o
@@ -44,6 +45,11 @@ Estas regras são **inegociáveis** e fazem parte do design, não são opções:
      guardado (regra 4).
    - Nenhum nome é aplicado sem a sua confirmação.
    - A chave da API fica só neste aparelho e nunca entra no JSON exportado.
+8. **Print do Intel processado localmente** (ADR-0005, `docs/adr/ADR-0005-print-intel-local.md`). Em **Ajustes → Importar print do Intel**, o app lê
+   um print que **você** tirou e escolheu, só no aparelho (canvas): sem IA, sem rede e sem nenhuma requisição
+   a domínios da Niantic. Detecta portais pelas cores fixas do mapa escuro, links e campos; você marca de 1 a
+   3 portais conhecidos para posicionar o print e confere a prévia antes de gravar. A imagem não é guardada;
+   nada de agentes é lido (a leitura é só de cor e geometria).
 
 ### Como isso é garantido no código
 
@@ -55,6 +61,7 @@ Estas regras são **inegociáveis** e fazem parte do design, não são opções:
 | A chave da API não entra no export nem em log | `exportPayload` em `plan.js` (lista fechada); `tests/printread.test.js` |
 | O service worker só intercepta a própria origem e os tiles do OSM | `sw.js` |
 | Import guarda só id, nome, posição, nível, chaves e observação; descarta qualquer outro campo (ex.: facção) | `sanitizePortal` em `app.js:64` |
+| Print do Intel é lido só por canvas, sem `fetch`/`XMLHttpRequest` e sem domínio da Niantic | `intelprint.js` (funções puras sobre pixels); `tests/parse-and-compliance.test.js` varre o arquivo |
 | Colar link **não abre** a URL: só extrai `lat,lng` por regex local | `parseCoords` em `geo.js` |
 | Teste automatizado falha se qualquer arquivo de código citar domínio da Niantic | `tests/parse-and-compliance.test.js` |
 | Teste automatizado falha se a CSP liberar outro host além do OSM (imagens) e da API da Anthropic (conexão) | `tests/parse-and-compliance.test.js` |
@@ -99,6 +106,11 @@ tela inicial" instala o app e ele abre sem internet (os tiles já visualizados f
   automaticamente** (ver Plano fixo). O **modo em campo** só libera quando você tiver todas as chaves da lista
   de farm, e então executa **o mesmo plano**, na mesma ordem e com os mesmos links, conferido com as chaves
   reais, sem recalcular.
+- **Aba Plano → Máx. chaves por portal** (padrão 8, faixa 1–50) → o otimizador nunca planeja mais links
+  chegando num portal do que esse limite, inclusive na simulação. Fora da simulação o limite efetivo é
+  o menor entre ele e as chaves que você tem. Com o limite, o fanfield testa também planos com 2 ou 3
+  âncoras (cada uma recebendo até o limite) e fica com o que mais rende no objetivo escolhido. A lista
+  de farm e o PDF nunca pedem mais que o limite de um portal; o resumo mostra "maior demanda de chaves".
 - **Ajustes → Objetivo → Máx. área (≈ MU)** → a área decide o plano. A área é só um proxy do MU: o MU
   real depende da densidade populacional, que o app não conhece. Compare áreas apenas dentro da mesma
   região. Cada camada conta: campos empilhados somam a área de todos.
@@ -126,6 +138,23 @@ tela inicial" instala o app e ele abre sem internet (os tiles já visualizados f
   **Links curtos** (`maps.app.goo.gl`) não têm coordenadas e são recusados: abra o link no navegador e
   copie o endereço completo, ou toque e segure no mapa do Google Maps e copie as coordenadas.
 - **Ajustes → Importar/Exportar JSON** (formato abaixo).
+- **Ajustes → Importar print do Intel** (mapa escuro, processado no aparelho):
+  - **Detecção:** neutro = miolo cinza RGB(86,86,86) ±3 com anel branco (área 150–700 px, 14–30 px de lado);
+    verde/azul = miolo cercado pelo anel de ressonadores (verde: G>200, R<90, B<90; azul: B>200, R<90,
+    100<G<200); vermelho/rosa = Machina. Links verdes/azuis por Hough sobre a máscara de cor, sem os
+    portais; campos pela sombra verde/azul em volta do portal. A interface (10% de cima e 8% de baixo) é
+    ignorada.
+  - **Georreferência:** escala 156543.03·cos(lat)/2^z/DPR m/px (z=15 e o DPR do aparelho, editáveis).
+    Toque em 1 a 3 portais do print e escolha o portal cadastrado (ou cole um link do Google Maps). Com 1
+    ponto: só translação; com 2+: ajusta também a escala e mostra o resíduo de cada ponto. Resíduo acima de
+    30 m: aviso e nada é gravado.
+  - **Resultado** (prévia sobre o print antes de gravar): portais novos "Print NN" com observação "ESTIMADO
+    pelo print DD/MM HH:MM" (incerteza de portal estimado); a menos de 15 m de um portal existente só
+    atualiza a facção. Links viram bloqueadores com origem e data; ponta fora do print vira bloqueador
+    **segmento** (lat/lng nas pontas, sem portal, prolongado até a borda, "ponta fora do print"). Portais
+    dentro de campo entram em "sob campo". ↶ Desfazer volta tudo.
+  - **Validade:** a lista de bloqueadores mostra a idade dos que vieram de print, e **Apagar bloqueios de
+    print com mais de X dias** (padrão 3) limpa os antigos.
   Aceita a chave `"portals"` ou `"portais"` e `lat`/`lng` ou `latitude`/`longitude`/`lon`. A chave de lista também pode ser `"pontos"`; portal sem nome vira `Portal NN`. Reimportar um
   arquivo sem `id` não duplica: portal a menos de 10 m de um existente é o mesmo e mantém chaves e nível.
 - **Ajustes → Desfazer última importação** remove os portais adicionados na última importação (com bloqueadores e links feitos ligados a eles). Importações com mais de 300 pontos pedem confirmação antes.
@@ -243,7 +272,7 @@ jogo, com confirmação um a um. Fica em **Ajustes → Nomear por print** e vem 
 
 ### Planejar e executar
 
-1. **Plano**: ajuste raio a pé (padrão 1500 m), links de saída por portal (padrão 8), objetivo e estratégia;
+1. **Plano**: ajuste raio a pé (padrão 1500 m), links de saída por portal (padrão 8), máx. chaves por portal (padrão 8), objetivo e estratégia;
    toque em **Calcular plano**. Saem: passos ordenados ("Vá até P, faça link P→Q, P→R"), campos, AP,
    distância total, chaves consumidas por portal e chaves faltantes.
    - **Ler o plano no mapa:** a linha amarela tracejada é a rota a pé, A → 1 → 2…, onde **A** é a posição
@@ -375,17 +404,22 @@ junto com quantos campos a mais isso renderia.
   "app": "field-planner",
   "version": 1,
   "portals": [
-    { "id": "p1", "nome": "Praça", "lat": -23.5505, "lng": -46.6333, "nivel": 6, "chaves": 3, "observacao": "" }
+    { "id": "p1", "nome": "Praça", "lat": -23.5505, "lng": -46.6333, "nivel": 6, "chaves": 3, "observacao": "", "faccao": "neutro" }
   ],
-  "blockers": [ { "id": "b1", "portalA": "p1", "portalB": "p2", "origem": "inimigo" } ],
+  "blockers": [
+    { "id": "b1", "portalA": "p1", "portalB": "p2", "origem": "inimigo" },
+    { "id": "b2", "portalA": "p1", "portalB": "p3", "origem": "inimigo", "fonte": "print", "ts": 1764082680000 },
+    { "id": "b3", "tipo": "segmento", "a": { "lat": -23.62, "lng": -46.68 }, "b": { "lat": -23.621, "lng": -46.672 },
+      "origem": "inimigo", "fonte": "print", "ts": 1764082680000, "nota": "ponta fora do print" }
+  ],
   "done": [ { "from": "p1", "to": "p2", "ts": 1763050000000 } ],
   "excluded": [],
   "coveredManual": [],
-  "settings": { "radius": 1500, "maxOut": 8, "objective": "campos", "strategy": "auto" },
+  "settings": { "radius": 1500, "maxOut": 8, "maxKeys": 8, "objective": "campos", "strategy": "auto" },
   "plan": {
     "v": 1, "ts": 1763300000000, "appVersion": "1.8.0", "pinned": true,
     "origin": { "lat": -23.55, "lng": -46.63 },
-    "settings": { "radius": 1500, "maxOut": 8, "objective": "campos", "strategy": "auto", "simulate": true },
+    "settings": { "radius": 1500, "maxOut": 8, "maxKeys": 8, "objective": "campos", "strategy": "auto", "simulate": true },
     "candidates": ["p1", "p2"],
     "positions": { "p1": [-23.5505, -46.6333] },
     "result": { "steps": [], "links": [], "fields": [], "simulation": true }
@@ -395,6 +429,13 @@ junto com quantos campos a mais isso renderia.
 
 `plan` é opcional: o resultado completo do otimizador (`result`) e as entradas do cálculo. `positions` são
 as posições dos portais do plano no momento do cálculo, usadas para avisar quando um portal foi movido.
+
+`faccao` (opcional): `neutro`, `verde`, `azul` ou `machina`. Bloqueador com `"fonte": "print"` guarda a data
+(`ts`) do print; `"tipo": "segmento"` não tem portal, só as duas pontas.
+
+`settings.maxKeys` (Máx. chaves por portal, 1–50) é opcional: arquivo sem ele importa como **8**.
+O registro do plano guarda o `maxKeys` usado no cálculo; `result.maxKeyDemand` traz a maior demanda de
+chaves de um portal e `result.anchors` as âncoras de um fanfield.
 
 Também aceita um array simples de portais. Importação mescla por `id` (mesmo id → atualiza).
 Valores são validados e limitados (nível 1–8, chaves 0–999, textos com tamanho máximo).
@@ -422,6 +463,10 @@ npm test     # node --test, sem dependências
 | `tests/matching.test.js` | casamento: húngaro, nomes e ruas, mapa com escala conhecida e desconhecida + ruído de 15 m + ponto espúrio, mapa girado, portais a 8 m (confiança baixa), grade regular (ambíguo), anéis, empate resolvido por 2ª observação, rua desempata, nomes sem disputar o mesmo portal, ≥ 1 km nunca decide, trilateração com ruído de 10 m e com origens mal espalhadas |
 | `tests/keylist-scenario.test.js` | lista de chaves, cenário sintético com a estrutura do teste real: já cadastrados reconhecidos sem renomear (acento, artigo, erro de digitação, sufixo de rua, ≥ 1 km), empate com o candidato certo, nomes sem portal abaixo de 50%, linha repetida, nenhum nome repetido, "Mural 1"/"Mural 2" separados |
 | `tests/real-16112026.test.js` | caso real de 16/11 (4 prints contra o arquivo do Brooklin). Roda só com as fixtures em `tests/fixtures-local/`, que ficam fora do git por terem a posição de onde os prints foram tirados; sem elas, é pulado |
+| `tests/intelprint.test.js` | print do Intel sintético: neutros e facções, links, ponta fora do print, sob campo, interface ignorada, escala padrão, georreferência com 1 e 3 pontos e resíduo > 30 m, import (Print NN, duplicata < 15 m, bloqueadores, segmento), segmento barra link no otimizador |
+| `tests/intel-real-25112026.test.js` | prints reais de 25/11 (zona sul): 75±3 neutros, resíduo ≤ 25 m e escala 2,19 ±3%, link verde do oeste até o AMRAP. Roda só com `tests/fixtures-local/intel-25112026/print-1138.png` (ou .jpg) e o Playwright; sem eles, é pulado |
+| `tests/real-zonasul-25112026.test.js` | caso real de 25/11: 23 portais da zona sul, MU, Simulação, maxKeys=8: farm ≤ 8 por portal e ≥ 12 campos. Roda só com `tests/fixtures-local/zona-sul-25112026.json`; sem ele, é pulado |
+| `tests/max-keys.test.js` | Máx. chaves por portal: leque de 30 portais com maxKeys=8, várias âncoras, maxKeys=50 igual à v1.11.0 (`tests/fixtures/optimizer-1.11.0.js`), import sem maxKeys → 8 |
 | `tests/printread.test.js` | leitura da IA: resposta válida, JSON inválido ou fora do formato recusado (inclusive campo de jogador), pedido com cabeçalho de navegador e json_schema, erros 401/429/5xx/rede, chave fora de mensagens, logs e export, recurso desligado por padrão |
 | `tests/review-fixes.test.js` | ids `__proto__`/`constructor`/`toString` em portais, bloqueadores, done e excluded; portais na mesma posição nunca linkados; portal visitado sem links vira destino do fan |
 

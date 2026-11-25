@@ -30,7 +30,7 @@ test('texto sem coordenadas devolve null', () => {
 // Conformidade: nenhum arquivo de código do app referencia domínios da Niantic.
 test('código do app não contém domínios da Niantic', () => {
   const root = path.join(__dirname, '..');
-  const files = ['index.html', 'app.js', 'geo.js', 'optimizer.js', 'plan.js', 'matching.js', 'printread.js', 'worker.js', 'sw.js', 'manifest.webmanifest'];
+  const files = ['index.html', 'app.js', 'geo.js', 'optimizer.js', 'plan.js', 'matching.js', 'printread.js', 'intelprint.js', 'worker.js', 'sw.js', 'manifest.webmanifest'];
   const forbidden = /(ingress\.com|nianticlabs\.com|nianticspatial\.com|niantic\.com)/i;
   for (const f of files) {
     const src = fs.readFileSync(path.join(root, f), 'utf8');
@@ -57,7 +57,7 @@ test('CSP da página: tiles do OSM em img-src e só a API da Anthropic em connec
 
 test('a única chamada de rede fora da origem é para a API da Anthropic, em printread.js', () => {
   const root = path.join(__dirname, '..');
-  for (const f of ['app.js', 'geo.js', 'optimizer.js', 'plan.js', 'matching.js', 'printread.js', 'worker.js', 'sw.js']) {
+  for (const f of ['app.js', 'geo.js', 'optimizer.js', 'plan.js', 'matching.js', 'printread.js', 'intelprint.js', 'worker.js', 'sw.js']) {
     const src = fs.readFileSync(path.join(root, f), 'utf8');
     // www.google.com/maps só aparece como link que o usuário abre (rota do plano, v1.7.0); o app não faz a requisição
     const urls = (src.match(/https:\/\/[a-z0-9.\-]+/gi) || []).filter(u => !/openstreetmap\.org$|^https:\/\/www\.google\.com$|api\.anthropic\.com$/.test(u));
@@ -75,4 +75,9 @@ test('VERSION do app.js e do sw.js andam juntas', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
   assert.equal(sw, app, 'sw.js e app.js com VERSION diferentes');
   assert.equal(pkg, app, 'package.json e app.js com versão diferente');
+});
+
+test('intelprint.js (print do Intel) não faz nenhuma requisição: sem fetch, XHR, import nem URL', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'intelprint.js'), 'utf8');
+  assert.ok(!/\bfetch\s*\(|XMLHttpRequest|importScripts|WebSocket|sendBeacon|https?:\/\//.test(src));
 });

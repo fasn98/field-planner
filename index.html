@@ -137,6 +137,7 @@
     min-height: 48px; padding: 0 18px; border-radius: 24px; border: 0; background: var(--accent); color: var(--accent-ink); font-weight: 700;
     box-shadow: 0 4px 16px rgba(0,0,0,.5); max-width: 92vw; }
   #updateBar[hidden] { display: none; }
+  #intelPick[hidden], #oldPrintRow[hidden] { display: none; }
   #moveBar { position: fixed; left: 12px; right: 12px; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); z-index: 2050; background: var(--panel);
     border: 1px solid var(--warn); border-radius: 14px; padding: 10px 12px; box-shadow: 0 4px 16px rgba(0,0,0,.5); max-width: 520px; margin: 0 auto; }
   #moveBar[hidden] { display: none; }
@@ -217,6 +218,7 @@
       <div class="grid2">
         <label class="f">Raio a pé (m)<input id="cfgRadius" type="number" inputmode="numeric" min="100" step="100"></label>
         <label class="f">Links de saída por portal<input id="cfgMaxOut" type="number" inputmode="numeric" min="1" max="40"></label>
+        <label class="f">Máx. chaves por portal<input id="cfgMaxKeys" type="number" inputmode="numeric" min="1" max="50"></label>
       </div>
       <div class="row">
         <label class="f grow">Objetivo
@@ -268,6 +270,15 @@
       <p class="muted small">Links que já existem no terreno e impedem cruzamentos. Informe apenas os dois portais e a origem.</p>
       <div class="row"><button id="addBlockerBtn" class="btn grow">+ Bloqueador</button></div>
       <ul id="blockerList" class="list"></ul>
+      <div class="row" id="oldPrintRow" hidden>
+        <label class="f">Dias<input id="oldPrintDays" type="number" inputmode="numeric" min="0" max="365" value="3"></label>
+        <button id="oldPrintBtn" class="btn sm grow">Apagar bloqueios de print com mais de X dias</button>
+      </div>
+
+      <h3>Importar print do Intel</h3>
+      <p class="muted small">Lê um print que você tirou do Intel (mapa escuro) neste aparelho, sem IA e sem internet: portais (neutros e facções), links e campos. Você marca de 1 a 3 portais conhecidos para posicionar o print; nada é gravado antes da prévia.</p>
+      <div class="row"><button id="intelBtn" class="btn grow">🖼 Importar print do Intel</button></div>
+      <input id="intelFile" type="file" accept="image/*" hidden>
 
       <h3>Links já feitos por mim</h3>
       <p class="muted small" id="doneInfo"></p>
@@ -290,7 +301,7 @@
       <input id="printFiles" type="file" accept="image/*" multiple hidden>
 
       <h3>Conformidade</h3>
-      <p class="muted small">Ferramenta independente, sem afiliação à Niantic. Não se comunica com servidores do jogo nem com o app: todos os portais são inseridos por você (digitados, links colados, arquivos que você escolhe importar ou nomes lidos de screenshots que você escolhe, sempre com a sua confirmação) e ficam só neste aparelho. O plano só simula: sem chave não há link, e tudo acontece no jogo, a pé. O GPS é apenas lido. Rede usada: os blocos de mapa do OpenStreetMap e, só se você ligar "Nomear por print", a API da Anthropic, para ler os screenshots que você escolher, com a sua chave. Nenhum serviço da Niantic é acessado. A imagem é enviada inteira; a IA é instruída a ignorar nomes de agentes, donos e COMM, e o app recusa respostas com dados de jogadores. Os screenshots não ficam guardados.</p>
+      <p class="muted small">Ferramenta independente, sem afiliação à Niantic. Não se comunica com servidores do jogo nem com o app: todos os portais são inseridos por você (digitados, links colados, arquivos que você escolhe importar ou nomes lidos de screenshots que você escolhe, sempre com a sua confirmação) e ficam só neste aparelho. O plano só simula: sem chave não há link, e tudo acontece no jogo, a pé. O GPS é apenas lido. Rede usada: os blocos de mapa do OpenStreetMap e, só se você ligar "Nomear por print", a API da Anthropic, para ler os screenshots que você escolher, com a sua chave. Nenhum serviço da Niantic é acessado. A imagem é enviada inteira; a IA é instruída a ignorar nomes de agentes, donos e COMM, e o app recusa respostas com dados de jogadores. Os screenshots não ficam guardados. O "Importar print do Intel" lê o print que você escolher só neste aparelho, sem IA e sem internet, apenas cores e geometria (portais, links, campos); a imagem não é guardada.</p>
       <p class="muted small" id="versionInfo"></p>
     </section>
   </div>
@@ -416,6 +427,32 @@
 </dialog>
 
 <!-- Diálogo: confirmação genérica -->
+<dialog id="intelDlg">
+  <form method="dialog" class="stack">
+    <h2>Importar print do Intel</h2>
+    <div class="grid2">
+      <label class="f">Zoom (z)<input name="zoom" type="number" inputmode="numeric" min="10" max="21" value="15"></label>
+      <label class="f">DPR do aparelho<input name="dpr" type="number" inputmode="decimal" min="0.5" max="5" step="0.25" value="2"></label>
+    </div>
+    <label class="f">Sua facção (links dela viram bloqueador aliado)
+      <select name="mine"><option value="">não informar (todos inimigos)</option><option value="verde">Verde</option><option value="azul">Azul</option></select></label>
+    <p class="muted small" id="intelInfo"></p>
+    <div style="overflow:auto;max-height:46vh"><canvas id="intelCanvas" style="width:100%;touch-action:manipulation"></canvas></div>
+    <p class="small">Toque num portal do print e escolha o portal correspondente (até 3):</p>
+    <ul id="intelRefs" class="list"></ul>
+    <div id="intelPick" class="stack" hidden>
+      <label class="f">Portal cadastrado<select name="refPortal"></select></label>
+      <label class="f">ou cole um link do Google Maps<input name="refLink" type="text" placeholder="https://maps.google.com/…"></label>
+      <div class="row"><button type="button" id="intelPickOk" class="btn grow">Usar como referência</button><button type="button" id="intelPickCancel" class="btn ghost">Cancelar</button></div>
+    </div>
+    <p class="small" id="intelFit"></p>
+    <div class="row"><span class="spacer"></span>
+      <button value="cancel" class="btn ghost">Cancelar</button>
+      <button value="save" id="intelSave" class="btn primary" disabled>Gravar</button>
+    </div>
+  </form>
+</dialog>
+
 <dialog id="confirmDlg">
   <form method="dialog" class="stack">
     <h2 id="confirmTitle">Confirmar</h2>
@@ -448,6 +485,7 @@
 <script src="plan.js"></script>
 <script src="matching.js"></script>
 <script src="printread.js"></script>
+<script src="intelprint.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

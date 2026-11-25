@@ -7,14 +7,14 @@
  * Tiles OSM: cache-first com rede como fallback, só os que você já visualizou (sem download em massa,
  * conforme a política de uso de tiles do OSM). Qualquer outra origem: não intercepta.
  */
-var VERSION = 'fp-v1.11.2';
+var VERSION = 'fp-v1.13.0';
 var SHELL = 'shell-' + VERSION;
 var TILES = 'tiles-v2'; // v1 guardava respostas opacas, incompatíveis com requests CORS
 var TILE_HOST = 'tile.openstreetmap.org';
 var MAX_TILES = 3000;
 
 var ASSETS = [
-  './', 'index.html', 'app.js', 'geo.js', 'optimizer.js', 'plan.js', 'matching.js', 'printread.js', 'worker.js', 'manifest.webmanifest',
+  './', 'index.html', 'app.js', 'geo.js', 'optimizer.js', 'plan.js', 'matching.js', 'printread.js', 'intelprint.js', 'worker.js', 'manifest.webmanifest',
   'icon.svg', 'icon-192.png', 'icon-512.png',
   'vendor/leaflet/leaflet.js', 'vendor/leaflet/leaflet.css',
   'vendor/leaflet/images/layers.png', 'vendor/leaflet/images/layers-2x.png',

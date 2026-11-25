@@ -8,7 +8,7 @@
   'use strict';
 
   var STORE = 'fieldplanner.v1';
-  var VERSION = '1.11.2';
+  var VERSION = '1.13.0';
   // nível padrão de portal novo ou importado sem nível: L1 só alcança 160 m e quase nunca fecha campo
   var DEFAULT_LEVEL = 5;
   // Qualquer string de 1–64 caracteres sem controle. A segurança contra "constructor"/"__proto__"
@@ -26,7 +26,7 @@
   function emptyDb() {
     return {
       version: 1, portals: [], blockers: [], done: [], excluded: [], coveredManual: [], lastImport: null, plan: null,
-      settings: { radius: 1500, maxOut: 8, objective: 'campos', strategy: 'auto', simulate: false }
+      settings: { radius: 1500, maxOut: 8, maxKeys: 8, objective: 'campos', strategy: 'auto', simulate: false }
     };
   }
   function load() {
@@ -36,6 +36,7 @@
       var d = JSON.parse(raw), base = emptyDb();
       Object.keys(base).forEach(function (k) { if (d[k] === undefined) d[k] = base[k]; });
       d.settings = Object.assign(base.settings, d.settings || {});
+      d.settings.maxKeys = clampInt(d.settings.maxKeys, 1, 50, 8);
       d.portals = d.portals.map(sanitizePortal).filter(Boolean);
       var ids = idSet(d.portals);
       d.blockers = d.blockers.map(function (b) { return sanitizeBlocker(b, ids); }).filter(Boolean);
@@ -82,7 +83,9 @@
       lat: lat, lng: lng,
       nivel: clampInt(p.nivel, 1, 8, DEFAULT_LEVEL),
       chaves: clampInt(p.chaves, 0, 999, 0),
-      observacao: String(p.observacao || '').slice(0, 300)
+      observacao: String(p.observacao || '').slice(0, 300),
+      // facção do portal (cor no mapa), só a cor: nunca dono, agente ou qualquer dado de jogador
+      faccao: FPIntel.FACTIONS.indexOf(p.faccao) >= 0 ? p.faccao : undefined
     };
   }
   function idSet(portals) {
@@ -103,11 +106,29 @@
     });
     return out;
   }
-  function blockerKey(b) { return [b.portalA, b.portalB].sort().join('\u0000') + '\u0000' + b.origem; }
+  function blockerKey(b) {
+    if (b.tipo === 'segmento') return 'seg\u0000' + [b.a.lat, b.a.lng, b.b.lat, b.b.lng].join(',') + '\u0000' + b.origem;
+    return [b.portalA, b.portalB].sort().join('\u0000') + '\u0000' + b.origem;
+  }
+  function llOk(p) { return p && isFinite(p.lat) && isFinite(p.lng) && Math.abs(p.lat) <= 90 && Math.abs(p.lng) <= 180 && String(p.lat).trim() !== '' && p.lat !== null && p.lng !== null; }
+  /** Bloqueador entre dois portais, ou "segmento" (de print: lat/lng nas duas pontas, sem portal). */
   function sanitizeBlocker(b, ids) {
-    if (!b || typeof b.portalA !== 'string' || typeof b.portalB !== 'string') return null;
+    if (!b || typeof b !== 'object') return null;
+    var base = { id: typeof b.id === 'string' && ID_RE.test(b.id) ? b.id : newId(), origem: b.origem === 'aliado' ? 'aliado' : 'inimigo' };
+    if (b.fonte === 'print') { base.fonte = 'print'; base.ts = Math.max(0, Math.min(Date.now(), Number(b.ts) || 0)); }
+    if (b.tipo === 'segmento') {
+      if (!llOk(b.a) || !llOk(b.b)) return null;
+      return Object.assign(base, { tipo: 'segmento', a: { lat: +b.a.lat, lng: +b.a.lng }, b: { lat: +b.b.lat, lng: +b.b.lng },
+        nota: String(b.nota || 'ponta fora do print').slice(0, 40) });
+    }
+    if (typeof b.portalA !== 'string' || typeof b.portalB !== 'string') return null;
     if (!ids[b.portalA] || !ids[b.portalB] || b.portalA === b.portalB) return null;
-    return { id: typeof b.id === 'string' && ID_RE.test(b.id) ? b.id : newId(), portalA: b.portalA, portalB: b.portalB, origem: b.origem === 'aliado' ? 'aliado' : 'inimigo' };
+    return Object.assign(base, { portalA: b.portalA, portalB: b.portalB });
+  }
+  function blockerAge(b) {
+    var d = FPIntel.printAgeDays(b, Date.now());
+    if (d == null) return '';
+    return d < 1 ? 'print de hoje' : 'print de ' + Math.floor(d) + ' dia' + (Math.floor(d) > 1 ? 's' : '');
   }
 
   var db = load();
@@ -226,6 +247,12 @@
     blockerLayer.clearLayers();
     doneLayer.clearLayers();
     db.blockers.forEach(function (b) {
+      if (b.tipo === 'segmento') {
+        L.polyline([[b.a.lat, b.a.lng], [b.b.lat, b.b.lng]], {
+          color: b.origem === 'aliado' ? '#58a6ff' : '#f85149', weight: 3, dashArray: '2 6', opacity: 0.9
+        }).bindTooltip((b.origem === 'aliado' ? 'Aliado' : 'Inimigo') + ' (segmento, ' + esc(b.nota) + ') · ' + esc(blockerAge(b))).addTo(blockerLayer);
+        return;
+      }
       var a = portalById(b.portalA), c = portalById(b.portalB);
       if (!a || !c) return;
       L.polyline([[a.lat, a.lng], [c.lat, c.lng]], {
@@ -372,7 +399,7 @@
   /** Ignora respostas do otimizador ainda a caminho (o plano atual passou a valer). */
   function cancelPending() { reqSeq++; busy = false; updateOptBtn(); }
   function liveData() {
-    return { portals: db.portals, blockers: db.blockers, done: db.done, excluded: db.excluded, coveredManual: db.coveredManual, maxOut: db.settings.maxOut };
+    return { portals: db.portals, blockers: db.blockers, done: db.done, excluded: db.excluded, coveredManual: db.coveredManual, maxOut: db.settings.maxOut, maxKeys: db.settings.maxKeys };
   }
   /** Validação do plano salvo contra os dados atuais (memorizada até o próximo save()). */
   function planValidation() {
@@ -435,7 +462,7 @@
       type: 'optimize', reqId: ++reqSeq,
       input: {
         portals: db.portals, blockers: db.blockers, done: db.done, excluded: db.excluded, coveredManual: db.coveredManual,
-        position: lastOptPos, radius: s.radius, maxOut: s.maxOut, objective: s.objective, strategy: s.strategy,
+        position: lastOptPos, radius: s.radius, maxOut: s.maxOut, maxKeys: s.maxKeys, objective: s.objective, strategy: s.strategy,
         ignoreKeys: !!s.simulate,
         timeBudgetMs: 1500
       }
@@ -467,23 +494,27 @@
   /* Painel: Plano.                                                */
   /* ------------------------------------------------------------ */
 
-  var cfg = { radius: $('#cfgRadius'), maxOut: $('#cfgMaxOut'), objective: $('#cfgObjective'), strategy: $('#cfgStrategy'), simulate: $('#cfgSimulate') };
+  var cfg = { radius: $('#cfgRadius'), maxOut: $('#cfgMaxOut'), maxKeys: $('#cfgMaxKeys'), objective: $('#cfgObjective'), strategy: $('#cfgStrategy'), simulate: $('#cfgSimulate') };
   cfg.simulate.checked = !!db.settings.simulate;
   cfg.radius.value = db.settings.radius;
   cfg.maxOut.value = db.settings.maxOut;
+  cfg.maxKeys.value = db.settings.maxKeys;
   cfg.objective.value = db.settings.objective;
   cfg.strategy.value = db.settings.strategy;
   Object.keys(cfg).forEach(function (k) {
     cfg[k].addEventListener('change', function () {
       db.settings.radius = clampInt(cfg.radius.value, 100, 100000, 1500);
       db.settings.maxOut = clampInt(cfg.maxOut.value, 1, 40, 8);
+      db.settings.maxKeys = clampInt(cfg.maxKeys.value, 1, 50, 8);
       db.settings.objective = cfg.objective.value;
       db.settings.strategy = cfg.strategy.value;
       var simChanged = db.settings.simulate !== cfg.simulate.checked;
       db.settings.simulate = cfg.simulate.checked;
       cfg.radius.value = db.settings.radius;
       cfg.maxOut.value = db.settings.maxOut;
+      cfg.maxKeys.value = db.settings.maxKeys;
       save();
+      if (!simChanged && plan) { validationMemo = null; renderPlanPanel(); } // novo limite de chaves: revalida o plano atual
       if (!simChanged || !plan) return;
       if (autoOptimize(db.settings.simulate ? 'simulação ligada' : 'simulação desligada')) return;
       // plano fixado: desligar a simulação reaproveita o mesmo plano, revalidado com as chaves reais
@@ -588,12 +619,14 @@
       out.appendChild(el('p', { class: 'muted small', text: 'Área total dos campos: ' + fmtArea(plan.area) +
         ' — o MU real é proporcional à área × densidade populacional local (desconhecida).' }));
     }
-    var meta = (STRAT_NAMES[plan.strategy] || '–') + (plan.anchor ? ' · âncora: ' + pname(plan.anchor) : '') +
+    var meta = (STRAT_NAMES[plan.strategy] || '–') + (plan.anchors && plan.anchors.length > 1
+        ? ' · âncoras: ' + plan.anchors.map(pname).join(', ') : plan.anchor ? ' · âncora: ' + pname(plan.anchor) : '') +
       (plan.base ? ' · base: ' + pname(plan.base[0]) + ' – ' + pname(plan.base[1]) + ' · ' + plan.layers + ' camada(s)' : '') +
       ' · ' + (plan.inRadius > plan.candidates
         ? plan.candidates + ' de ' + plan.inRadius + ' portais ' + (plan.origin ? 'no raio ' : '') + 'considerados (com chave e mais próximos primeiro)'
         : plan.candidates + ' portal(is) no raio') + ' · ' + plan.elapsedMs + ' ms';
     out.appendChild(el('p', { class: 'muted small', text: meta }));
+    if (kn.demand) out.appendChild(el('p', { class: 'small key-demand', text: demandText(kn.demand) }));
 
     if (!plan.links.length) {
       out.appendChild(el('p', { class: 'muted', text: 'Nenhum link possível.' }));
@@ -781,6 +814,11 @@
     return svg;
   }
 
+  function demandText(d) {
+    var lim = plan && plan.maxKeys ? plan.maxKeys : db.settings.maxKeys;
+    return '🔑 Maior demanda de chaves: ' + d.need + ' (' + pname(d.portal) + ') · limite ' + lim + ' por portal';
+  }
+
   function buildPrintReport() {
     var r = $('#printReport');
     r.textContent = '';
@@ -830,6 +868,7 @@
     r.appendChild(el('table', { class: 'pr-table' }, [el('thead', null, [el('tr', null, [
       el('th', { class: 'n', text: '#' }), el('th', { text: 'Ir até' }), el('th', { class: 'n', text: 'Andar' }), el('th', { text: 'Links' })])]), tb]));
     var kn = FPPlan.keyNeeds(plan, db.portals); // chaves de agora, não as do momento do cálculo
+    if (kn.demand) r.appendChild(el('p', { text: demandText(kn.demand) }));
     if (kn.used.length) {
       r.appendChild(el('h2', { text: 'Chaves consumidas' }));
       var kb = el('tbody');
@@ -1124,7 +1163,10 @@
     db.blockers.forEach(function (b) {
       ul.appendChild(el('li', { class: 'item' }, [
         el('span', { class: 'chip ' + (b.origem === 'aliado' ? 'ok' : 'bad'), text: b.origem }),
-        el('div', { class: 'grow name', text: pname(b.portalA) + ' – ' + pname(b.portalB) }),
+        el('div', { class: 'grow name' }, [
+          b.tipo === 'segmento' ? 'Segmento (' + b.nota + ')' : pname(b.portalA) + ' – ' + pname(b.portalB),
+          b.fonte === 'print' ? el('div', { class: 'muted small', text: blockerAge(b) + ' · ' + FPIntel.fmtStamp(b.ts) }) : null
+        ]),
         el('button', { class: 'btn sm ghost', 'aria-label': 'Remover bloqueador', text: '✕', onclick: function () {
           db.blockers = db.blockers.filter(function (x) { return x !== b; });
           save(); invalidatePlan();
@@ -1132,7 +1174,21 @@
       ]));
     });
     if (!db.blockers.length) ul.appendChild(el('li', { class: 'muted', text: 'Nenhum bloqueador.' }));
+    var nPrint = db.blockers.filter(function (b) { return b.fonte === 'print'; }).length;
+    $('#oldPrintRow').hidden = !nPrint;
   }
+  $('#oldPrintBtn').addEventListener('click', function () {
+    var days = clampInt($('#oldPrintDays').value, 0, 365, 3), now = Date.now();
+    var old = db.blockers.filter(function (b) { var a = FPIntel.printAgeDays(b, now); return a != null && a > days; });
+    if (!old.length) { toast('Nenhum bloqueio de print com mais de ' + days + ' dia(s)'); return; }
+    confirmDialog('Apagar bloqueios antigos', 'Apagar ' + old.length + ' bloqueio(s) vindos de print com mais de ' + days + ' dia(s)? Links no terreno mudam; confira no Intel de novo.').then(function (ok) {
+      if (!ok) return;
+      pushUndo();
+      db.blockers = db.blockers.filter(function (b) { return old.indexOf(b) < 0; });
+      save(); invalidatePlan();
+      toast(old.length + ' bloqueio(s) de print apagado(s). ↶ Desfazer volta.');
+    });
+  });
 
   var blockerCb = null;
   function openBlockerDlg(preA, preB, cb) {
@@ -1259,14 +1315,8 @@
     });
     if (data.settings && typeof data.settings === 'object') {
       var st = data.settings;
-      db.settings = {
-        radius: clampInt(st.radius, 100, 100000, db.settings.radius),
-        maxOut: clampInt(st.maxOut, 1, 40, db.settings.maxOut),
-        objective: ['campos', 'ap', 'distancia', 'mu'].indexOf(st.objective) >= 0 ? st.objective : db.settings.objective,
-          simulate: typeof st.simulate === 'boolean' ? st.simulate : db.settings.simulate,
-        strategy: ['auto', 'fanfield', 'triangulacao', 'multicamada'].indexOf(st.strategy) >= 0 ? st.strategy : db.settings.strategy
-      };
-      cfg.radius.value = db.settings.radius; cfg.maxOut.value = db.settings.maxOut;
+      db.settings = FPPlan.importSettings(st, db.settings); // arquivo sem maxKeys → 8
+      cfg.radius.value = db.settings.radius; cfg.maxOut.value = db.settings.maxOut; cfg.maxKeys.value = db.settings.maxKeys;
       cfg.objective.value = db.settings.objective; cfg.strategy.value = db.settings.strategy; cfg.simulate.checked = db.settings.simulate;
     }
     save();
@@ -1659,7 +1709,7 @@
   function snapshot() {
     return JSON.stringify({ done: db.done, excluded: db.excluded, blockers: db.blockers, coveredManual: db.coveredManual,
       // chaves, nome, nível e posição: o desfazer cobre também o "Nomear por print"
-      portals: db.portals.map(function (p) { return [p.id, p.chaves, p.nome, p.nivel, p.lat, p.lng, p.observacao]; }),
+      portals: db.portals.map(function (p) { return [p.id, p.chaves, p.nome, p.nivel, p.lat, p.lng, p.observacao, p.faccao]; }),
       // plano fixado não é recalculado: o desfazer devolve também os passos que tinham saído dele,
       // mas só ao mesmo plano (gen); outro plano fixado depois disso não recebe passos de um antigo
       plan: plan ? { gen: planGen, steps: plan.steps, links: plan.links } : null });
@@ -1757,7 +1807,7 @@
     db.done = snap.done; db.excluded = snap.excluded; db.blockers = snap.blockers; db.coveredManual = snap.coveredManual;
     snap.portals.forEach(function (v) {
       var p = portalById(v[0]);
-      if (p) { p.chaves = v[1]; p.nome = v[2]; p.nivel = v[3]; p.lat = v[4]; p.lng = v[5]; p.observacao = v[6]; }
+      if (p) { p.chaves = v[1]; p.nome = v[2]; p.nivel = v[3]; p.lat = v[4]; p.lng = v[5]; p.observacao = v[6]; p.faccao = v[7] || undefined; }
     });
     if (snap.plan && isPinned() && snap.plan.gen === planGen) { plan.steps = snap.plan.steps; plan.links = snap.plan.links; }
     else if (isPinned()) toast('Desfeito nos dados; o plano fixado é outro e não foi alterado', 4000);
@@ -2586,6 +2636,143 @@
     var updBar = $('#updateBar');
     if (updBar) updBar.addEventListener('click', function () { location.reload(); });
   }
+
+
+  /* ------------------------------------------------------------ */
+  /* Importar print do Intel (Ajustes). 100% local: canvas, sem IA */
+  /* e sem rede. A imagem fica só na memória desta tela.           */
+  /* ------------------------------------------------------------ */
+  var intel = null; // { img, an, refs: [{ i, lat, lng, label }], pickIdx, now }
+  $('#intelBtn').addEventListener('click', function () { $('#intelFile').value = ''; $('#intelFile').click(); });
+  $('#intelFile').addEventListener('change', function (e) {
+    var f = e.target.files && e.target.files[0];
+    if (!f) return;
+    var url = URL.createObjectURL(f), im = new Image();
+    im.onload = function () {
+      var c = document.createElement('canvas');
+      c.width = im.naturalWidth; c.height = im.naturalHeight;
+      var g = c.getContext('2d');
+      g.drawImage(im, 0, 0);
+      URL.revokeObjectURL(url);
+      var data = g.getImageData(0, 0, c.width, c.height);
+      var fm = $('#intelDlg form').elements;
+      fm.dpr.value = String(window.devicePixelRatio || 2);
+      fm.mine.value = db.settings.myFaction || '';
+      intel = { im: im, img: data, an: FPIntel.analyze(data), refs: [], pickIdx: null, now: f.lastModified || Date.now() };
+      renderIntel();
+      $('#intelDlg').returnValue = '';
+      $('#intelDlg').showModal();
+    };
+    im.onerror = function () { URL.revokeObjectURL(url); toastError('Não consegui abrir a imagem'); };
+    im.src = url;
+  });
+
+  function intelOpts() {
+    var fm = $('#intelDlg form').elements;
+    return { zoom: clampInt(fm.zoom.value, 10, 21, 15), dpr: Math.max(0.5, Math.min(5, Number(fm.dpr.value) || 2)) };
+  }
+  function intelFit() {
+    if (!intel || !intel.refs.length) return null;
+    var P = intel.an.portals;
+    return FPIntel.fitTransform(intel.refs.map(function (r) { return { x: P[r.i].x, y: P[r.i].y, lat: r.lat, lng: r.lng }; }), intelOpts());
+  }
+  var FAC_COL = { neutro: '#e6e6e6', verde: '#3fb950', azul: '#58a6ff', machina: '#f85149' };
+  function renderIntel() {
+    var an = intel.an, cv = $('#intelCanvas'), g = cv.getContext('2d');
+    cv.width = an.width; cv.height = an.height;
+    g.drawImage(intel.im, 0, 0);
+    g.fillStyle = 'rgba(0,0,0,.45)'; // interface ignorada
+    g.fillRect(0, 0, an.width, an.area.y0); g.fillRect(0, an.area.y1, an.width, an.height - an.area.y1);
+    g.lineWidth = 4;
+    an.links.forEach(function (l) {
+      g.strokeStyle = l.cor === 'verde' ? '#ffe066' : '#ff66ff';
+      g.setLineDash(l.a.fora || l.b.fora ? [10, 8] : []);
+      g.beginPath(); g.moveTo(l.a.x, l.a.y); g.lineTo(l.b.x, l.b.y); g.stroke();
+    });
+    g.setLineDash([]);
+    an.portals.forEach(function (p, i) {
+      g.strokeStyle = FAC_COL[p.faccao]; g.lineWidth = 3;
+      g.beginPath(); g.arc(p.x, p.y, p.r + 6, 0, 2 * Math.PI); g.stroke();
+      if (p.coberto) { g.fillStyle = 'rgba(255,224,102,.5)'; g.beginPath(); g.arc(p.x, p.y, p.r + 6, 0, 2 * Math.PI); g.fill(); }
+      var ri = intel.refs.findIndex(function (r) { return r.i === i; });
+      if (ri >= 0) { g.fillStyle = '#ff2d55'; g.font = 'bold 28px system-ui'; g.fillText(String(ri + 1), p.x + p.r + 6, p.y - p.r - 4); }
+    });
+    var by = {}; an.portals.forEach(function (p) { by[p.faccao] = (by[p.faccao] || 0) + 1; });
+    $('#intelInfo').textContent = an.portals.length + ' portais (' + Object.keys(by).map(function (k) { return by[k] + ' ' + k; }).join(', ') + '), ' +
+      an.links.length + ' links, ' + an.portals.filter(function (p) { return p.coberto; }).length + ' sob campo. Escala padrão: ' +
+      FPIntel.defaultScale(db.portals.length ? db.portals[0].lat : -23.6, intelOpts().zoom, intelOpts().dpr).toFixed(2) + ' m/px.';
+    var ul = $('#intelRefs'); ul.textContent = '';
+    var tr = intelFit();
+    intel.refs.forEach(function (r, k) {
+      ul.appendChild(el('li', { class: 'item' }, [el('div', { class: 'grow', text: (k + 1) + '. ' + r.label + (tr ? ' · resíduo ' + tr.residuals[k] + ' m' : '') }),
+        el('button', { type: 'button', class: 'btn sm ghost', text: '✕', onclick: function () { intel.refs.splice(k, 1); renderIntel(); } })]));
+    });
+    var fit = $('#intelFit'), save = $('#intelSave');
+    if (!tr) { fit.textContent = 'Marque pelo menos 1 portal de referência.'; save.disabled = true; return; }
+    fit.textContent = (tr.points === 1 ? '1 ponto: só translação, escala padrão ' : tr.points + ' pontos: escala ajustada ') + tr.scale.toFixed(2) + ' m/px · maior resíduo ' + tr.maxResidual + ' m' +
+      (tr.ok ? '' : ' — ⚠ acima de 30 m: confira as referências (portal trocado, zoom ou DPR errado). Não dá para gravar assim.');
+    fit.className = tr.ok ? 'small' : 'small plan-warn';
+    save.disabled = !tr.ok;
+  }
+  $('#intelDlg form').elements.zoom.addEventListener('change', function () { if (intel) renderIntel(); });
+  $('#intelDlg form').elements.dpr.addEventListener('change', function () { if (intel) renderIntel(); });
+  $('#intelCanvas').addEventListener('click', function (e) {
+    if (!intel) return;
+    var cv = e.currentTarget, rc = cv.getBoundingClientRect(), k = cv.width / rc.width;
+    var x = (e.clientX - rc.left) * k, y = (e.clientY - rc.top) * k, bi = -1, bd = Infinity;
+    intel.an.portals.forEach(function (p, i) { var d = Math.hypot(p.x - x, p.y - y); if (d < bd) { bd = d; bi = i; } });
+    if (bi < 0 || bd > 60) { toast('Toque mais perto de um portal detectado (círculo)'); return; }
+    if (intel.refs.length >= 3 && !intel.refs.some(function (r) { return r.i === bi; })) { toast('Já são 3 referências: remova uma antes'); return; }
+    intel.pickIdx = bi;
+    var fm = $('#intelDlg form').elements, sel = fm.refPortal;
+    sel.textContent = '';
+    sel.appendChild(el('option', { value: '', text: '— escolha —' }));
+    db.portals.slice().sort(function (a, b) { return a.nome.localeCompare(b.nome); })
+      .forEach(function (p) { sel.appendChild(el('option', { value: p.id, text: p.nome })); });
+    fm.refLink.value = '';
+    $('#intelPick').hidden = false;
+  });
+  $('#intelPickCancel').addEventListener('click', function () { $('#intelPick').hidden = true; intel.pickIdx = null; });
+  $('#intelPickOk').addEventListener('click', function () {
+    var fm = $('#intelDlg form').elements, ref = null;
+    var c = fm.refLink.value.trim() ? FPGeo.parseCoords(fm.refLink.value) : null; // regex local: o link não é aberto
+    if (c) ref = { lat: c.lat, lng: c.lng, label: 'link ' + c.lat.toFixed(5) + ', ' + c.lng.toFixed(5) };
+    else if (fm.refPortal.value) { var p = portalById(fm.refPortal.value); ref = { lat: p.lat, lng: p.lng, label: p.nome, portal: p.id }; }
+    if (!ref) { toast('Escolha um portal ou cole um link com coordenadas'); return; }
+    ref.i = intel.pickIdx;
+    intel.refs = intel.refs.filter(function (r) { return r.i !== ref.i; });
+    intel.refs.push(ref);
+    $('#intelPick').hidden = true;
+    renderIntel();
+  });
+  $('#intelDlg').addEventListener('close', function () {
+    var d = $('#intelDlg'), fm = d.querySelector('form').elements, cur = intel;
+    intel = null; $('#intelPick').hidden = true;
+    if (d.returnValue !== 'save' || !cur) return;
+    var tr = FPIntel.fitTransform(cur.refs.map(function (r) { var p = cur.an.portals[r.i]; return { x: p.x, y: p.y, lat: r.lat, lng: r.lng }; }), intelOpts());
+    if (!tr || !tr.ok) { toastError('Resíduo acima de 30 m: nada foi importado'); return; }
+    db.settings.myFaction = fm.mine.value || '';
+    // portal escolhido como referência é aquele portal (mesmo a mais de 15 m da posição ajustada)
+    var forced = {};
+    cur.refs.forEach(function (r) { if (r.portal) forced[r.i] = r.portal; });
+    var nums = db.portals.map(function (p) { var m = /^Print (\d+)$/.exec(p.nome); return m ? +m[1] : 0; });
+    var res = FPIntel.buildImport(cur.an, tr, db.portals, { now: cur.now, myFaction: fm.mine.value || null, newId: newId,
+      nextNum: Math.max.apply(null, nums.concat([0])) + 1, forced: forced });
+    pushUndo();
+    res.novos.forEach(function (p) { var s2 = sanitizePortal(p); s2.id = p.id; db.portals.push(s2); });
+    res.updates.forEach(function (u) { var p = portalById(u.id); if (p) p.faccao = u.faccao; });
+    var have = {}; db.blockers.forEach(function (b) { have[blockerKey(b)] = true; });
+    var ids = idSet(db.portals), nb = 0;
+    res.blockers.concat(res.segments).forEach(function (b) {
+      var s2 = sanitizeBlocker(b, ids);
+      if (s2 && !have[blockerKey(s2)]) { have[blockerKey(s2)] = true; db.blockers.push(s2); nb++; }
+    });
+    res.covered.forEach(function (id) { if (db.coveredManual.indexOf(id) < 0) db.coveredManual.push(id); });
+    recordImport(res.novos.map(function (p) { return p.id; }), 'print do Intel');
+    save(); invalidatePlan();
+    toast('Print: ' + res.novos.length + ' portal(is) novo(s), ' + res.updates.length + ' facção(ões) atualizada(s), ' + nb + ' bloqueador(es), ' +
+      res.covered.length + ' sob campo. ↶ Desfazer volta tudo.', 6000);
+  });
 
   refreshSuggestions();
   renderNameBox();

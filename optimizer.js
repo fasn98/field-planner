@@ -13,7 +13,16 @@
   var AP_FIELD = 1250;
   var INF_KEYS = 1e6;
   var MAX_CAND = 30;
+  var MAX_KEYS = 8;   // padrão de "Máx. chaves por portal": links planejados chegando em um portal
+  var MAX_KEYS_HI = 50;
   var FAR_M = 8.9e6; // ~80° de arco // portais considerados por cálculo (os demais ficam de fora do plano)
+
+  /** Máx. chaves por portal: inteiro 1–50; ausente ou inválido → 8. */
+  function normMaxKeys(v) {
+    var n = Math.floor(Number(v));
+    if (!isFinite(n) || v === null || v === '' || v === undefined) return MAX_KEYS;
+    return Math.max(1, Math.min(MAX_KEYS_HI, n));
+  }
 
   function pairKey(i, j) { return i < j ? i + '|' + j : j + '|' + i; }
 
@@ -44,7 +53,16 @@
     });
 
     var fixed = [];
+    // bloqueador "segmento" (de print, ponta fora da tela): só a reta, sem portal
+    var segs = [];
     (input.blockers || []).forEach(function (b) {
+      if (!b || b.tipo !== 'segmento' || !b.a || !b.b) return;
+      if (G.haversine(ref, b.a) > FAR_M || G.haversine(ref, b.b) > FAR_M) return;
+      var A = proj.toXY(b.a), B = proj.toXY(b.b);
+      segs.push({ a: { x: A.x, y: A.y }, b: { x: B.x, y: B.y }, kind: b.origem === 'aliado' ? 'ally' : 'enemy', nome: b.nota || 'segmento' });
+    });
+    (input.blockers || []).forEach(function (b) {
+      if (b && b.tipo === 'segmento') return;
       if (idx[b.portalA] === undefined || idx[b.portalB] === undefined || b.portalA === b.portalB) return;
       if (pts[idx[b.portalA]].far || pts[idx[b.portalB]].far) return;
       fixed.push({ a: idx[b.portalA], b: idx[b.portalB], kind: b.origem === 'aliado' ? 'ally' : 'enemy' });
@@ -82,9 +100,10 @@
       .filter(function (i) { return i !== undefined; });
 
     return {
-      pts: pts, idx: idx, fixed: fixed, excluded: excluded, candidates: candidates, forcedCovered: forcedCovered, inRadius: inRadius,
+      pts: pts, idx: idx, fixed: fixed, segs: segs, excluded: excluded, candidates: candidates, forcedCovered: forcedCovered, inRadius: inRadius,
       position: input.position || null,
       maxOut: Math.max(1, Math.floor(Number(input.maxOut) || 8)),
+      maxKeys: normMaxKeys(input.maxKeys),
       ignoreKeys: !!input.ignoreKeys
     };
   }
@@ -97,7 +116,8 @@
     this.pairs = Object.create(null); // pairKey -> true
     this.friendAdj = [];           // vizinhos via links da nossa facção (ally/own/plan)
     this.out = new Array(n).fill(0);
-    this.keysLeft = world.pts.map(function (p) { return world.ignoreKeys ? INF_KEYS : p.keys; });
+    // nunca mais que maxKeys links planejados chegando num portal (também na simulação)
+    this.keysLeft = world.pts.map(function (p) { return Math.min(world.maxKeys, world.ignoreKeys ? INF_KEYS : p.keys); });
     this.keysUsed = new Array(n).fill(0);
     this.cover = [];               // triângulos que cobrem portais (todas as facções)
     this.covered = new Array(n).fill(false);
@@ -143,6 +163,7 @@
     if (this.pairs[pairKey(s, t)]) return 'link já existe';
     if (w.excluded[pairKey(s, t)]) return 'par marcado como falho';
     if (this.out[s] >= w.maxOut) return 'limite de links de saída';
+    if (this.keysUsed[t] >= w.maxKeys) return 'limite de chaves por portal';
     if (this.keysLeft[t] <= 0) return 'sem chave do destino';
     var d = G.haversine(P[s], P[t]); // distância real (a projeção estica longe do centro)
     if (d < 1) return 'portais na mesma posição';
@@ -150,6 +171,9 @@
     for (var i = 0; i < this.links.length; i++) {
       var l = this.links[i];
       if (G.segmentsCross(P[s], P[t], P[l.a], P[l.b])) return 'cruza link';
+    }
+    for (i = 0; i < w.segs.length; i++) {
+      if (G.segmentsCross(P[s], P[t], w.segs[i].a, w.segs[i].b)) return 'cruza segmento';
     }
     return null;
   };
@@ -208,7 +232,7 @@
             if (st.whyNot(s, t) === null) made.push({ to: t, fields: st.addLink(s, t) });
           });
         } else if (policy.type === 'fan') {
-          var prio = [policy.anchor];
+          var prio = (policy.anchors || [policy.anchor]).slice();
           for (var k = steps.length - 1; k >= 0; k--) prio.push(steps[k].portal);
           // portais visitados sem links também servem como destino
           for (var vi = visitOrder.length - 1; vi >= 0; vi--) if (prio.indexOf(visitOrder[vi]) < 0) prio.push(visitOrder[vi]);
@@ -339,6 +363,40 @@
         consider(simulate(world, o, { type: 'fan', anchor: anchor }), 'fanfield', o, { type: 'fan', anchor: anchor });
       });
     });
+    multiAnchorPlans(world, consider, anchors, deadline);
+  }
+
+  /*
+   * Fanfield com várias âncoras: com o limite de chaves por portal, uma âncora só recebe no máximo
+   * maxKeys links. Testa pares e trios de âncoras: as âncoras extras são visitadas primeiro (linkam
+   * para as anteriores) e cada portal do leque linka primeiro para as âncoras, na ordem, até lotarem.
+   * Só roda quando o limite de chaves pode de fato cortar o leque de uma âncora.
+   */
+  function multiAnchorPlans(world, consider, anchors, deadline) {
+    var ids = world.candidates;
+    if (ids.length < 4 || world.maxKeys >= ids.length - 1) return;
+    var top = anchors.slice(0, Math.min(anchors.length, 10));
+    var run = function (set) {
+      var rest = ids.filter(function (i) { return set.indexOf(i) < 0; });
+      var ord = angularOrder(world, set[0], rest);
+      var pre = set.slice(1);
+      [ord, ord.slice().reverse()].forEach(function (o) {
+        var order = pre.concat(o);
+        var policy = { type: 'fan', anchor: set[0], anchors: set.slice() };
+        consider(simulate(world, order, policy), 'fanfield', order, policy);
+      });
+    };
+    var i, j, k;
+    for (i = 0; i < top.length; i++) for (j = 0; j < top.length; j++) {
+      if (i === j) continue;
+      if (Date.now() >= deadline) return;
+      run([top[i], top[j]]);
+    }
+    for (i = 0; i < top.length; i++) for (j = 0; j < top.length; j++) for (k = 0; k < top.length; k++) {
+      if (i === j || j === k || i === k) continue;
+      if (Date.now() >= deadline) return;
+      run([top[i], top[j], top[k]]);
+    }
   }
 
   /*
@@ -469,13 +527,15 @@
       ok: true,
       strategy: best ? best.strategy : null,
       anchor: best && best.policy.type === 'fan' ? world.pts[best.policy.anchor].id : null,
+      anchors: best && best.policy.type === 'fan' ? (best.policy.anchors || [best.policy.anchor]).map(function (i) { return world.pts[i].id; }) : null,
+      maxKeys: world.maxKeys,
       base: best && best.policy.type === 'layers' ? best.policy.base.map(function (i) { return world.pts[i].id; }) : null,
       layers: best && best.policy.type === 'layers' ? best.res.fields : 0,
       candidates: world.candidates.length,
       candidateIds: world.candidates.map(function (i) { return world.pts[i].id; }),
       inRadius: world.inRadius,
       steps: [], links: [], fields: [], distance: 0, ap: 0, area: 0, simulation: !!input.ignoreKeys,
-      keysUsed: [], keysMissing: [], potentialFields: 0,
+      keysUsed: [], keysMissing: [], potentialFields: 0, maxKeyDemand: null,
       elapsedMs: 0
     };
     if (!best) { out.elapsedMs = Date.now() - t0; return out; }
@@ -523,11 +583,17 @@
         if (k > P[i].keys) out.keysMissing.push({ portal: P[i].id, need: k, have: P[i].keys, missing: k - P[i].keys });
       });
     }
+    // maior demanda de chaves de um portal (plano ou lista de farm): nunca passa de maxKeys
+    var dem = null;
+    out.keysUsed.forEach(function (k) { if (!dem || k.used > dem.need) dem = { portal: k.portal, need: k.used }; });
+    out.keysMissing.forEach(function (k) { if (!dem || k.need > dem.need) dem = { portal: k.portal, need: k.need }; });
+    out.maxKeyDemand = dem;
     out.elapsedMs = Date.now() - t0;
     return out;
   }
 
   return {
+    normMaxKeys: normMaxKeys, MAX_KEYS: MAX_KEYS, MAX_KEYS_HI: MAX_KEYS_HI,
     optimize: optimize,
     // expostos para testes
     _internal: { layerChain: layerChain, buildWorld: buildWorld, State: State, simulate: simulate, nearestNeighbor: nearestNeighbor, twoOpt: twoOpt, angularOrder: angularOrder, routeLength: routeLength },
