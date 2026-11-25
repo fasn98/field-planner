@@ -114,3 +114,18 @@ test('registro do plano guarda maxKeys e export inclui settings.maxKeys', () => 
   const db = { portals: [], blockers: [], done: [], excluded: [], coveredManual: [], settings: { maxKeys: 6 }, plan: rec };
   assert.equal(JSON.parse(JSON.stringify(Plan.exportPayload(db))).settings.maxKeys, 6);
 });
+
+test('export com observações (v1.11.2) leva settings.maxKeys junto; arquivo v1.11.2 sem maxKeys importa como 8', () => {
+  const o = { nome: 'Praça', endereco: null, distancia_m: 120, nivel: 3, chaves: 2, origem: { ...at(0, 0), precisao: 10 }, ts: 5 };
+  const db = { portals: [], blockers: [], done: [], excluded: [], coveredManual: [], plan: null,
+    settings: { radius: 1500, maxOut: 8, maxKeys: 12, objective: 'mu', strategy: 'auto', simulate: true } };
+  const file = JSON.parse(JSON.stringify(Plan.exportPayload(db, 1, { observacoes: [o] })));
+  assert.equal(file.settings.maxKeys, 12);
+  assert.equal(file.observacoes.length, 1);
+  const cur = { ...db.settings, maxKeys: 30 };
+  assert.equal(Plan.importSettings(file.settings, cur).maxKeys, 12);
+  // arquivo da v1.11.2: settings sem maxKeys, com observações
+  const v1112 = { ...file, settings: { radius: 1500, maxOut: 8, objective: 'mu', strategy: 'auto', simulate: true } };
+  assert.equal(Plan.importSettings(v1112.settings, cur).maxKeys, 8);
+  assert.equal(v1112.observacoes[0].nome, 'Praça');
+});
