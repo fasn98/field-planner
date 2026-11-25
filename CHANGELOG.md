@@ -2,6 +2,15 @@
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Datas no formato AAAA-MM-DD.
 
+## [1.13.1] — 2026-11-25
+### Corrigido
+- **Importar print do Intel**, conferido com o print real de 25/11: faltavam 12 neutros e 8 verdes.
+  - Neutro: aceita o miolo cinza pelo formato com só ≥ 30% de anel branco (antes 60%). Pega hexágonos encostados em outro, sob link ou na borda.
+  - Facções: anel ≥ 45% (antes 75%) e, além disso, miolo como buraco do anel dilatado 2 px, com abertura 5×5 e tamanho 8–34 px. Pega portais em grupo, como o AMRAP.
+  - `autoMatchRefs` não aceita em silêncio encaixe com resíduo acima de 25 m (`ok: false`, pede para tocar nas referências).
+- `scripts/intel-debug.js`: gera uma imagem de depuração com os portais detectados marcados por facção. Roda só no computador, com Playwright.
+- 3 testes sintéticos novos dos casos que falharam.
+
 ## [1.13.0] — 2026-11-25
 ### Adicionado
 - **Ajustes → Importar print do Intel** (ADR-0005): lê no aparelho, por canvas, um print do Intel (mapa escuro) que o usuário tirou. Sem IA e sem nenhuma requisição; a imagem não é guardada.

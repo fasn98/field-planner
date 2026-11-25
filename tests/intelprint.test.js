@@ -112,3 +112,41 @@ test('bloqueador "segmento" (ponta fora do print) impede link que o cruza', () =
   const res = O.optimize({ portals: ps, blockers: [seg], timeBudgetMs: 200 });
   assert.ok(!res.links.some(l => [l.from, l.to].sort().join() === 'A,B'));
 });
+
+test('neutro com anel branco incompleto (encostado em outro, sob link, na borda) ainda é detectado', () => {
+  const img = canvas(400, 600, C.bg);
+  // dois neutros encostados: cada anel perde uma faixa para o vizinho
+  img.disc(100, 200, 12, C.white); img.disc(100, 200, 9, C.gray);
+  img.disc(121, 200, 12, C.white); img.disc(121, 200, 9, C.gray);
+  img.disc(100, 200, 9, C.gray); // o miolo do 1º fica por cima do anel do 2º
+  // neutro com link verde passando por cima do anel
+  img.disc(250, 300, 12, C.white); img.disc(250, 300, 9, C.gray);
+  img.line(150, 288, 350, 288, C.green, 4); img.line(150, 312, 350, 312, C.green, 4);
+  // neutro perto da borda esquerda: parte do anel fica fora do print
+  img.disc(11, 400, 12, C.white); img.disc(11, 400, 9, C.gray);
+  const ps = I.detectPortals(img).filter(p => p.faccao === 'neutro');
+  for (const [x, y] of [[100, 200], [121, 200], [250, 300], [11, 400]]) assert.ok(ps.some(p => Math.hypot(p.x - x, p.y - y) < 4), `faltou (${x},${y})`);
+  // falso positivo: quadrado cinza sem anel nenhum não vira portal
+  const img2 = canvas(200, 300, C.bg); img2.disc(100, 150, 9, C.gray);
+  assert.equal(I.detectPortals(img2).length, 0);
+});
+
+test('verde em grupo, com anel quebrado e links atravessando, é detectado', () => {
+  const img = canvas(400, 600, C.bg);
+  faction(img, 200, 300, 'verde'); faction(img, 223, 300, 'verde'); faction(img, 211, 320, 'verde');
+  // anel quebrado: falha de ressonador e link que corta o anel
+  img.disc(200, 288, 3, C.bg); img.disc(188, 300, 3, C.bg);
+  img.line(0, 305, 400, 305, C.green, 3);
+  const ps = I.detectPortals(img).filter(p => p.faccao === 'verde');
+  for (const [x, y] of [[200, 300], [223, 300], [211, 320]]) assert.ok(ps.some(p => Math.hypot(p.x - x, p.y - y) < 5), `faltou (${x},${y}) — achou ${ps.map(p => p.x.toFixed(0) + ',' + p.y.toFixed(0)).join(' ')}`);
+});
+
+test('autoMatchRefs não aceita em silêncio encaixe com resíduo acima de 25 m', () => {
+  const ps = [{ x: 100, y: 100 }, { x: 300, y: 120 }, { x: 180, y: 400 }];
+  const refs = [llOf(100, 100), llOf(300, 120), { ...llOf(180, 400), lat: llOf(180, 400).lat + 0.0006, lng: llOf(180, 400).lng - 0.0009 }]; // referência ~110 m fora do lugar
+  const m = I.autoMatchRefs(ps, refs, { zoom: 15, dpr: 2 });
+  assert.equal(m.ok, false);
+  assert.match(m.message, /toque nas referências/);
+  const good = I.autoMatchRefs(ps, [llOf(100, 100), llOf(300, 120), llOf(180, 400)], { zoom: 15, dpr: 2 });
+  assert.equal(good.ok, true);
+});
