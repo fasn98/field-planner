@@ -8,7 +8,7 @@
   'use strict';
 
   var STORE = 'fieldplanner.v1';
-  var VERSION = '1.13.0';
+  var VERSION = '1.13.1';
   // nível padrão de portal novo ou importado sem nível: L1 só alcança 160 m e quase nunca fecha campo
   var DEFAULT_LEVEL = 5;
   // Qualquer string de 1–64 caracteres sem controle. A segurança contra "constructor"/"__proto__"

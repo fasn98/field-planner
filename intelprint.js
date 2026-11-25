@@ -17,7 +17,8 @@
     coreMin: 150, coreMax: 700, sideMin: 14, sideMax: 30,
     linkMinLen: 40, linkGap: 6, linkWidth: 3, maxLinks: 120,
     endTol: 10, edgeTol: 8,
-    maxResidual: 30, dupM: 15
+    maxResidual: 30, dupM: 15,
+    neutralRing: 0.3, factionRing: 0.45, autoMaxResidual: 25
   };
   var FACTIONS = ['neutro', 'verde', 'azul', 'machina'];
 
@@ -99,13 +100,14 @@
       return c.area >= o.coreMin && c.area <= o.coreMax && bw >= o.sideMin && bw <= o.sideMax && bh >= o.sideMin && bh <= o.sideMax &&
         bw / bh > 0.6 && bw / bh < 1.67 && c.area / (bw * bh) > 0.5;
     };
-    // neutros: miolo cinza (86,86,86)±3 cercado de anel branco
+    // neutros: miolo cinza (86,86,86)±3 pelo formato; o anel branco pode estar incompleto (hexágono encostado
+    // em outro, sob link ou perto da borda), então basta ≥ neutralRing dele
     var gray = components(w, img.height, function (i) { return isGray(d[i * 4], d[i * 4 + 1], d[i * 4 + 2]); }, area);
     gray.comps.forEach(function (c) {
       if (!okShape(c)) return;
       var r = Math.max(c.maxx - c.minx, c.maxy - c.miny) / 2;
       var white = Math.max(ringFrac(img, c.x, c.y, r + 2, isWhite), ringFrac(img, c.x, c.y, r + 3, isWhite));
-      if (white >= 0.6) out.push({ x: c.x, y: c.y, r: r + 3, faccao: 'neutro' });
+      if (white >= o.neutralRing) out.push({ x: c.x, y: c.y, r: r + 3, faccao: 'neutro' });
     });
     // facções: miolo (qualquer cor que não a da facção) cercado pelo anel de ressonadores da facção
     [['verde', isGreen], ['azul', isBlue], ['machina', isRed]].forEach(function (f) {
@@ -118,11 +120,75 @@
         if (!okShape(c)) return;
         var r = Math.max(c.maxx - c.minx, c.maxy - c.miny) / 2;
         var ring = Math.max(ringFrac(img, c.x, c.y, r + 1.5, test), ringFrac(img, c.x, c.y, r + 3, test));
-        if (ring >= 0.75) out.push({ x: c.x, y: c.y, r: r + 4, faccao: f[0] });
+        if (ring >= o.factionRing) out.push({ x: c.x, y: c.y, r: r + 4, faccao: f[0] });
+      });
+      // alternativa para portais em grupo (anel encostado em outro anel ou em link): miolo = buraco do anel
+      // dilatado 2 px, depois abertura 5×5; tamanho 8–34 px
+      ringHoles(img, test, area).forEach(function (c) {
+        if (out.some(function (q) { return Math.hypot(q.x - c.x, q.y - c.y) < 10; })) return;
+        out.push({ x: c.x, y: c.y, r: c.r + 4, faccao: f[0] });
       });
     });
     out.sort(function (a, b) { return a.y - b.y || a.x - b.x; });
     return out;
+  }
+
+  function ringHoles(img, test, area) {
+    var d = img.data, w = img.width, h = img.height, m = new Uint8Array(w * h), dil = new Uint8Array(w * h), out = [];
+    for (var y = area.y0; y <= area.y1; y++) for (var x = area.x0; x <= area.x1; x++) {
+      var i = y * w + x;
+      if (test(d[i * 4], d[i * 4 + 1], d[i * 4 + 2])) m[i] = 1;
+    }
+    for (y = area.y0; y <= area.y1; y++) for (x = area.x0; x <= area.x1; x++) {
+      if (!m[y * w + x]) continue;
+      for (var yy = Math.max(area.y0, y - 2); yy <= Math.min(area.y1, y + 2); yy++)
+        for (var xx = Math.max(area.x0, x - 2); xx <= Math.min(area.x1, x + 2); xx++) dil[yy * w + xx] = 1;
+    }
+    var holes = components(w, h, function (i) { return !dil[i]; }, area);
+    holes.comps.forEach(function (c) {
+      var bw = c.maxx - c.minx + 1, bh = c.maxy - c.miny + 1;
+      if (bw > 34 || bh > 34) return;
+      if (c.minx <= area.x0 || c.miny <= area.y0 || c.maxx >= area.x1 || c.maxy >= area.y1) return; // não fechado
+      // miolo = preenchido − anel (dilatado): o próprio buraco, devolvido ao tamanho com a dilatação
+      var x0 = c.minx - 2, y0 = c.miny - 2, W = bw + 4, H = bh + 4, core = new Uint8Array(W * H);
+      for (var yy = 0; yy < H; yy++) for (var xx = 0; xx < W; xx++) {
+        var gx = x0 + xx, gy = y0 + yy;
+        if (gx < 0 || gy < 0 || gx >= w || gy >= h) continue;
+        var gi = gy * w + gx;
+        if (holes.lab[gi] === c.label || (dil[gi] && !m[gi] && nearLabel(holes.lab, w, h, gx, gy, c.label))) core[yy * W + xx] = 1;
+      }
+      var op = morph(morph(core, W, H, 2, true), W, H, 2, false); // abertura 5×5
+      var n = 0, sx = 0, sy = 0, mnx = W, mxx = -1, mny = H, mxy = -1;
+      for (yy = 0; yy < H; yy++) for (xx = 0; xx < W; xx++) if (op[yy * W + xx]) {
+        n++; sx += xx; sy += yy; if (xx < mnx) mnx = xx; if (xx > mxx) mxx = xx; if (yy < mny) mny = yy; if (yy > mxy) mxy = yy;
+      }
+      if (!n) return;
+      var ow = mxx - mnx + 1, oh = mxy - mny + 1;
+      if (ow < 8 || oh < 8 || ow > 34 || oh > 34 || ow / oh < 0.6 || ow / oh > 1.67) return;
+      out.push({ x: x0 + sx / n, y: y0 + sy / n, r: Math.max(ow, oh) / 2 });
+    });
+    return out;
+  }
+  function nearLabel(lab, w, h, x, y, l) {
+    for (var dy = -2; dy <= 2; dy++) for (var dx = -2; dx <= 2; dx++) {
+      var X = x + dx, Y = y + dy;
+      if (X >= 0 && Y >= 0 && X < w && Y < h && lab[Y * w + X] === l) return true;
+    }
+    return false;
+  }
+  /** Erosão (erode=true) ou dilatação com quadrado de raio r. */
+  function morph(a, W, H, r, erode) {
+    var o = new Uint8Array(W * H);
+    for (var y = 0; y < H; y++) for (var x = 0; x < W; x++) {
+      var v = erode ? 1 : 0;
+      for (var dy = -r; dy <= r && v === (erode ? 1 : 0); dy++) for (var dx = -r; dx <= r; dx++) {
+        var X = x + dx, Y = y + dy, b = X >= 0 && Y >= 0 && X < W && Y < H ? a[Y * W + X] : 0;
+        if (erode && !b) { v = 0; break; }
+        if (!erode && b) { v = 1; break; }
+      }
+      o[y * W + x] = v;
+    }
+    return o;
   }
 
   /* ---------------- links (Hough sobre a máscara de cor, sem os portais) ---------------- */
@@ -360,6 +426,11 @@
       var tr = fitTransform(pairs, o);
       if (!best || tr.maxResidual < best.tr.maxResidual) best = { refs: pairs, tr: tr };
     });
+    // encaixe ruim não é aceito em silêncio: o usuário toca nas referências
+    if (best) {
+      best.ok = best.tr.maxResidual <= o.autoMaxResidual;
+      if (!best.ok) best.message = 'Encaixe automático com resíduo de ' + best.tr.maxResidual + ' m (acima de ' + o.autoMaxResidual + ' m): toque nas referências no print.';
+    }
     return best;
   }
 
