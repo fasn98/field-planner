@@ -2,6 +2,14 @@
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Datas no formato AAAA-MM-DD.
 
+## [1.12.0] — 2026-11-25
+### Adicionado
+- **Ajustes → Máx. chaves por portal** (padrão 8, faixa 1–50, `settings.maxKeys`): o otimizador nunca planeja mais links chegando num portal do que o limite, também em modo Simulação. Fora da simulação o limite efetivo é min(maxKeys, chaves que tenho).
+- **Fanfield com várias âncoras:** com o limite, testa pares e trios de âncoras (cada uma com até maxKeys links de entrada) e fica com o plano que mais rende no objetivo escolhido, sem cruzar links e respeitando o limite de links de saída.
+- Resumo do plano e PDF mostram "maior demanda de chaves: X (portal Y)"; lista de farm e PDF nunca passam de maxKeys num portal.
+- `maxKeys` entra no export/import JSON (arquivo sem ele → 8) e no registro do plano (`settings.maxKeys`, `result.maxKeys`, `result.anchors`, `result.maxKeyDemand`).
+- 8 testes novos (`tests/max-keys.test.js`), incluindo a comparação com o otimizador da v1.11.0 (`tests/fixtures/optimizer-1.11.0.js`) para maxKeys=50.
+
 ## [1.11.2] — 2026-11-18
 ### Adicionado
 - **Observações de listas de chaves no export/import do JSON**, para juntar as leituras de dois aparelhos (computador e celular) na trilateração.

@@ -8,7 +8,7 @@
   'use strict';
 
   var STORE = 'fieldplanner.v1';
-  var VERSION = '1.11.2';
+  var VERSION = '1.12.0';
   // nível padrão de portal novo ou importado sem nível: L1 só alcança 160 m e quase nunca fecha campo
   var DEFAULT_LEVEL = 5;
   // Qualquer string de 1–64 caracteres sem controle. A segurança contra "constructor"/"__proto__"
@@ -26,7 +26,7 @@
   function emptyDb() {
     return {
       version: 1, portals: [], blockers: [], done: [], excluded: [], coveredManual: [], lastImport: null, plan: null,
-      settings: { radius: 1500, maxOut: 8, objective: 'campos', strategy: 'auto', simulate: false }
+      settings: { radius: 1500, maxOut: 8, maxKeys: 8, objective: 'campos', strategy: 'auto', simulate: false }
     };
   }
   function load() {
@@ -36,6 +36,7 @@
       var d = JSON.parse(raw), base = emptyDb();
       Object.keys(base).forEach(function (k) { if (d[k] === undefined) d[k] = base[k]; });
       d.settings = Object.assign(base.settings, d.settings || {});
+      d.settings.maxKeys = clampInt(d.settings.maxKeys, 1, 50, 8);
       d.portals = d.portals.map(sanitizePortal).filter(Boolean);
       var ids = idSet(d.portals);
       d.blockers = d.blockers.map(function (b) { return sanitizeBlocker(b, ids); }).filter(Boolean);
@@ -372,7 +373,7 @@
   /** Ignora respostas do otimizador ainda a caminho (o plano atual passou a valer). */
   function cancelPending() { reqSeq++; busy = false; updateOptBtn(); }
   function liveData() {
-    return { portals: db.portals, blockers: db.blockers, done: db.done, excluded: db.excluded, coveredManual: db.coveredManual, maxOut: db.settings.maxOut };
+    return { portals: db.portals, blockers: db.blockers, done: db.done, excluded: db.excluded, coveredManual: db.coveredManual, maxOut: db.settings.maxOut, maxKeys: db.settings.maxKeys };
   }
   /** Validação do plano salvo contra os dados atuais (memorizada até o próximo save()). */
   function planValidation() {
@@ -435,7 +436,7 @@
       type: 'optimize', reqId: ++reqSeq,
       input: {
         portals: db.portals, blockers: db.blockers, done: db.done, excluded: db.excluded, coveredManual: db.coveredManual,
-        position: lastOptPos, radius: s.radius, maxOut: s.maxOut, objective: s.objective, strategy: s.strategy,
+        position: lastOptPos, radius: s.radius, maxOut: s.maxOut, maxKeys: s.maxKeys, objective: s.objective, strategy: s.strategy,
         ignoreKeys: !!s.simulate,
         timeBudgetMs: 1500
       }
@@ -467,23 +468,27 @@
   /* Painel: Plano.                                                */
   /* ------------------------------------------------------------ */
 
-  var cfg = { radius: $('#cfgRadius'), maxOut: $('#cfgMaxOut'), objective: $('#cfgObjective'), strategy: $('#cfgStrategy'), simulate: $('#cfgSimulate') };
+  var cfg = { radius: $('#cfgRadius'), maxOut: $('#cfgMaxOut'), maxKeys: $('#cfgMaxKeys'), objective: $('#cfgObjective'), strategy: $('#cfgStrategy'), simulate: $('#cfgSimulate') };
   cfg.simulate.checked = !!db.settings.simulate;
   cfg.radius.value = db.settings.radius;
   cfg.maxOut.value = db.settings.maxOut;
+  cfg.maxKeys.value = db.settings.maxKeys;
   cfg.objective.value = db.settings.objective;
   cfg.strategy.value = db.settings.strategy;
   Object.keys(cfg).forEach(function (k) {
     cfg[k].addEventListener('change', function () {
       db.settings.radius = clampInt(cfg.radius.value, 100, 100000, 1500);
       db.settings.maxOut = clampInt(cfg.maxOut.value, 1, 40, 8);
+      db.settings.maxKeys = clampInt(cfg.maxKeys.value, 1, 50, 8);
       db.settings.objective = cfg.objective.value;
       db.settings.strategy = cfg.strategy.value;
       var simChanged = db.settings.simulate !== cfg.simulate.checked;
       db.settings.simulate = cfg.simulate.checked;
       cfg.radius.value = db.settings.radius;
       cfg.maxOut.value = db.settings.maxOut;
+      cfg.maxKeys.value = db.settings.maxKeys;
       save();
+      if (!simChanged && plan) { validationMemo = null; renderPlanPanel(); } // novo limite de chaves: revalida o plano atual
       if (!simChanged || !plan) return;
       if (autoOptimize(db.settings.simulate ? 'simulação ligada' : 'simulação desligada')) return;
       // plano fixado: desligar a simulação reaproveita o mesmo plano, revalidado com as chaves reais
@@ -588,12 +593,14 @@
       out.appendChild(el('p', { class: 'muted small', text: 'Área total dos campos: ' + fmtArea(plan.area) +
         ' — o MU real é proporcional à área × densidade populacional local (desconhecida).' }));
     }
-    var meta = (STRAT_NAMES[plan.strategy] || '–') + (plan.anchor ? ' · âncora: ' + pname(plan.anchor) : '') +
+    var meta = (STRAT_NAMES[plan.strategy] || '–') + (plan.anchors && plan.anchors.length > 1
+        ? ' · âncoras: ' + plan.anchors.map(pname).join(', ') : plan.anchor ? ' · âncora: ' + pname(plan.anchor) : '') +
       (plan.base ? ' · base: ' + pname(plan.base[0]) + ' – ' + pname(plan.base[1]) + ' · ' + plan.layers + ' camada(s)' : '') +
       ' · ' + (plan.inRadius > plan.candidates
         ? plan.candidates + ' de ' + plan.inRadius + ' portais ' + (plan.origin ? 'no raio ' : '') + 'considerados (com chave e mais próximos primeiro)'
         : plan.candidates + ' portal(is) no raio') + ' · ' + plan.elapsedMs + ' ms';
     out.appendChild(el('p', { class: 'muted small', text: meta }));
+    if (kn.demand) out.appendChild(el('p', { class: 'small key-demand', text: demandText(kn.demand) }));
 
     if (!plan.links.length) {
       out.appendChild(el('p', { class: 'muted', text: 'Nenhum link possível.' }));
@@ -781,6 +788,11 @@
     return svg;
   }
 
+  function demandText(d) {
+    var lim = plan && plan.maxKeys ? plan.maxKeys : db.settings.maxKeys;
+    return '🔑 Maior demanda de chaves: ' + d.need + ' (' + pname(d.portal) + ') · limite ' + lim + ' por portal';
+  }
+
   function buildPrintReport() {
     var r = $('#printReport');
     r.textContent = '';
@@ -830,6 +842,7 @@
     r.appendChild(el('table', { class: 'pr-table' }, [el('thead', null, [el('tr', null, [
       el('th', { class: 'n', text: '#' }), el('th', { text: 'Ir até' }), el('th', { class: 'n', text: 'Andar' }), el('th', { text: 'Links' })])]), tb]));
     var kn = FPPlan.keyNeeds(plan, db.portals); // chaves de agora, não as do momento do cálculo
+    if (kn.demand) r.appendChild(el('p', { text: demandText(kn.demand) }));
     if (kn.used.length) {
       r.appendChild(el('h2', { text: 'Chaves consumidas' }));
       var kb = el('tbody');
@@ -1259,14 +1272,8 @@
     });
     if (data.settings && typeof data.settings === 'object') {
       var st = data.settings;
-      db.settings = {
-        radius: clampInt(st.radius, 100, 100000, db.settings.radius),
-        maxOut: clampInt(st.maxOut, 1, 40, db.settings.maxOut),
-        objective: ['campos', 'ap', 'distancia', 'mu'].indexOf(st.objective) >= 0 ? st.objective : db.settings.objective,
-          simulate: typeof st.simulate === 'boolean' ? st.simulate : db.settings.simulate,
-        strategy: ['auto', 'fanfield', 'triangulacao', 'multicamada'].indexOf(st.strategy) >= 0 ? st.strategy : db.settings.strategy
-      };
-      cfg.radius.value = db.settings.radius; cfg.maxOut.value = db.settings.maxOut;
+      db.settings = FPPlan.importSettings(st, db.settings); // arquivo sem maxKeys → 8
+      cfg.radius.value = db.settings.radius; cfg.maxOut.value = db.settings.maxOut; cfg.maxKeys.value = db.settings.maxKeys;
       cfg.objective.value = db.settings.objective; cfg.strategy.value = db.settings.strategy; cfg.simulate.checked = db.settings.simulate;
     }
     save();

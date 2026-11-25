@@ -46,7 +46,7 @@
       appVersion: String(meta.appVersion || ''),
       pinned: !!meta.pinned,
       origin: ll(meta.origin),
-      settings: { radius: s.radius, maxOut: s.maxOut, objective: s.objective, strategy: s.strategy, simulate: !!s.simulate },
+      settings: { radius: s.radius, maxOut: s.maxOut, maxKeys: O.normMaxKeys(s.maxKeys), objective: s.objective, strategy: s.strategy, simulate: !!s.simulate },
       candidates: (result.candidateIds || []).slice(),
       positions: positions,
       result: result
@@ -93,6 +93,8 @@
       ok: true,
       strategy: ['fanfield', 'triangulacao', 'multicamada'].indexOf(r.strategy) >= 0 ? r.strategy : null,
       anchor: isId(r.anchor) ? r.anchor : null,
+      anchors: Array.isArray(r.anchors) && r.anchors.length && r.anchors.length <= 10 && r.anchors.every(isId) ? r.anchors.slice() : null,
+      maxKeys: O.normMaxKeys(r.maxKeys),
       base: Array.isArray(r.base) && r.base.length === 2 && r.base.every(isId) ? r.base.slice() : null,
       layers: Math.max(0, Math.round(num(r.layers, 0))),
       candidates: Math.max(0, Math.round(num(r.candidates, 0))),
@@ -106,6 +108,7 @@
       keysUsed: keyRows(r.keysUsed, false),
       keysMissing: keyRows(r.keysMissing, true),
       potentialFields: Math.max(0, Math.round(num(r.potentialFields, 0))),
+      maxKeyDemand: r.maxKeyDemand && isId(r.maxKeyDemand.portal) ? { portal: r.maxKeyDemand.portal, need: Math.max(0, Math.round(num(r.maxKeyDemand.need, 0))) } : null,
       elapsedMs: Math.max(0, Math.round(num(r.elapsedMs, 0))),
       reason: '',
       origin: ll(r.origin) || ll(raw.origin)
@@ -123,7 +126,7 @@
       pinned: !!raw.pinned,
       origin: result.origin,
       settings: {
-        radius: Math.round(num(s.radius, 0)) || null, maxOut: Math.round(num(s.maxOut, 0)) || null,
+        radius: Math.round(num(s.radius, 0)) || null, maxOut: Math.round(num(s.maxOut, 0)) || null, maxKeys: O.normMaxKeys(s.maxKeys),
         objective: typeof s.objective === 'string' ? s.objective.slice(0, 20) : null,
         strategy: typeof s.strategy === 'string' ? s.strategy.slice(0, 20) : null, simulate: !!s.simulate
       },
@@ -155,7 +158,11 @@
       return { portal: k.portal, need: k.need, have: h, missing: k.need - h };
     }).filter(function (k) { return k.missing > 0; });
     var total = missing.reduce(function (a, k) { return a + k.missing; }, 0);
-    return { used: rows, missing: missing, totalMissing: total, extra: extra };
+    // maior demanda de chaves de um único portal (links do plano ou da lista "mais campos")
+    var demand = null;
+    rows.forEach(function (r) { if (!demand || r.used > demand.need) demand = { portal: r.portal, need: r.used }; });
+    extra.forEach(function (k) { if (!demand || k.need > demand.need) demand = { portal: k.portal, need: k.need }; });
+    return { used: rows, missing: missing, totalMissing: total, extra: extra, demand: demand };
   }
 
   /** Número do passo (1…) de cada link restante. */
@@ -168,7 +175,7 @@
   /**
    * Valida o plano salvo contra os dados atuais, sem recalcular: refaz os links restantes, na mesma ordem,
    * sobre o estado atual (bloqueadores, links feitos, pares falhos, portais sob campo, limite de saída).
-   * data: { portals, blockers, done, excluded, coveredManual, maxOut }
+   * data: { portals, blockers, done, excluded, coveredManual, maxOut, maxKeys }
    * opts.useKeys: true confere também as chaves de agora (para executar em campo); senão só a geometria.
    * Devolve { ok, issues: [{ n, step, kind, text }], steps: [passos afetados] }.
    */
@@ -195,7 +202,7 @@
     var world = O._internal.buildWorld({
       portals: data.portals || [], blockers: data.blockers, done: data.done, excluded: data.excluded,
       coveredManual: data.coveredManual, position: rec.origin || result.origin || null,
-      radius: 1e9, maxOut: data.maxOut, ignoreKeys: !useKeys, maxCandidates: 3
+      radius: 1e9, maxOut: data.maxOut, maxKeys: data.maxKeys, ignoreKeys: !useKeys, maxCandidates: 3
     });
     var st = new O._internal.State(world), P = world.pts;
 
@@ -220,6 +227,7 @@
             'cruza ' + what + (hit ? P[hit.a].nome + ' – ' + P[hit.b].nome : ''));
           return;
         }
+        if (why === 'limite de chaves por portal') { add(l, 'chave', name(l.to) + ' passaria de ' + world.maxKeys + ' chaves por portal (Máx. chaves por portal)'); return; }
         if (why === 'sem chave do destino') { add(l, 'chave', 'sem chave de ' + name(l.to) + ' para este link'); return; }
         if (why) { add(l, 'invalido', why); return; }
         var made = st.addLink(a, b).length;
@@ -288,8 +296,28 @@
     return out;
   }
 
+  function clampInt(v, lo, hi, def) {
+    var n = Math.round(Number(v));
+    if (v === null || v === '' || !isFinite(n)) return def;
+    return Math.max(lo, Math.min(hi, n));
+  }
+
+  /** Ajustes vindos de um JSON importado, sobre os atuais. maxKeys ausente → 8 (padrão), não o valor atual. */
+  function importSettings(st, cur) {
+    st = st && typeof st === 'object' ? st : {};
+    return {
+      radius: clampInt(st.radius, 100, 100000, cur.radius),
+      maxOut: clampInt(st.maxOut, 1, 40, cur.maxOut),
+      maxKeys: clampInt(st.maxKeys, 1, O.MAX_KEYS_HI, O.MAX_KEYS),
+      objective: ['campos', 'ap', 'distancia', 'mu'].indexOf(st.objective) >= 0 ? st.objective : cur.objective,
+      simulate: typeof st.simulate === 'boolean' ? st.simulate : cur.simulate,
+      strategy: ['auto', 'fanfield', 'triangulacao', 'multicamada'].indexOf(st.strategy) >= 0 ? st.strategy : cur.strategy
+    };
+  }
+
   return {
     exportPayload: exportPayload,
+    importSettings: importSettings,
     RECORD_V: RECORD_V, MOVE_WARN_M: MOVE_WARN_M, MOVE_RECALC_M: MOVE_RECALC_M, PERIODIC_RECALC_MS: PERIODIC_RECALC_MS,
     autoRecalcReason: autoRecalcReason,
     makeRecord: makeRecord, sanitizeRecord: sanitizeRecord, keyNeeds: keyNeeds,

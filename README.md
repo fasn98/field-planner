@@ -99,6 +99,11 @@ tela inicial" instala o app e ele abre sem internet (os tiles já visualizados f
   automaticamente** (ver Plano fixo). O **modo em campo** só libera quando você tiver todas as chaves da lista
   de farm, e então executa **o mesmo plano**, na mesma ordem e com os mesmos links, conferido com as chaves
   reais, sem recalcular.
+- **Ajustes → Máx. chaves por portal** (padrão 8, faixa 1–50) → o otimizador nunca planeja mais links
+  chegando num portal do que esse limite, inclusive na simulação. Fora da simulação o limite efetivo é
+  o menor entre ele e as chaves que você tem. Com o limite, o fanfield testa também planos com 2 ou 3
+  âncoras (cada uma recebendo até o limite) e fica com o que mais rende no objetivo escolhido. A lista
+  de farm e o PDF nunca pedem mais que o limite de um portal; o resumo mostra "maior demanda de chaves".
 - **Ajustes → Objetivo → Máx. área (≈ MU)** → a área decide o plano. A área é só um proxy do MU: o MU
   real depende da densidade populacional, que o app não conhece. Compare áreas apenas dentro da mesma
   região. Cada camada conta: campos empilhados somam a área de todos.
@@ -243,7 +248,7 @@ jogo, com confirmação um a um. Fica em **Ajustes → Nomear por print** e vem 
 
 ### Planejar e executar
 
-1. **Plano**: ajuste raio a pé (padrão 1500 m), links de saída por portal (padrão 8), objetivo e estratégia;
+1. **Plano**: ajuste raio a pé (padrão 1500 m), links de saída por portal (padrão 8), máx. chaves por portal (padrão 8), objetivo e estratégia;
    toque em **Calcular plano**. Saem: passos ordenados ("Vá até P, faça link P→Q, P→R"), campos, AP,
    distância total, chaves consumidas por portal e chaves faltantes.
    - **Ler o plano no mapa:** a linha amarela tracejada é a rota a pé, A → 1 → 2…, onde **A** é a posição
@@ -381,11 +386,11 @@ junto com quantos campos a mais isso renderia.
   "done": [ { "from": "p1", "to": "p2", "ts": 1763050000000 } ],
   "excluded": [],
   "coveredManual": [],
-  "settings": { "radius": 1500, "maxOut": 8, "objective": "campos", "strategy": "auto" },
+  "settings": { "radius": 1500, "maxOut": 8, "maxKeys": 8, "objective": "campos", "strategy": "auto" },
   "plan": {
     "v": 1, "ts": 1763300000000, "appVersion": "1.8.0", "pinned": true,
     "origin": { "lat": -23.55, "lng": -46.63 },
-    "settings": { "radius": 1500, "maxOut": 8, "objective": "campos", "strategy": "auto", "simulate": true },
+    "settings": { "radius": 1500, "maxOut": 8, "maxKeys": 8, "objective": "campos", "strategy": "auto", "simulate": true },
     "candidates": ["p1", "p2"],
     "positions": { "p1": [-23.5505, -46.6333] },
     "result": { "steps": [], "links": [], "fields": [], "simulation": true }
@@ -395,6 +400,10 @@ junto com quantos campos a mais isso renderia.
 
 `plan` é opcional: o resultado completo do otimizador (`result`) e as entradas do cálculo. `positions` são
 as posições dos portais do plano no momento do cálculo, usadas para avisar quando um portal foi movido.
+
+`settings.maxKeys` (Máx. chaves por portal, 1–50) é opcional: arquivo sem ele importa como **8**.
+O registro do plano guarda o `maxKeys` usado no cálculo; `result.maxKeyDemand` traz a maior demanda de
+chaves de um portal e `result.anchors` as âncoras de um fanfield.
 
 Também aceita um array simples de portais. Importação mescla por `id` (mesmo id → atualiza).
 Valores são validados e limitados (nível 1–8, chaves 0–999, textos com tamanho máximo).
@@ -422,6 +431,7 @@ npm test     # node --test, sem dependências
 | `tests/matching.test.js` | casamento: húngaro, nomes e ruas, mapa com escala conhecida e desconhecida + ruído de 15 m + ponto espúrio, mapa girado, portais a 8 m (confiança baixa), grade regular (ambíguo), anéis, empate resolvido por 2ª observação, rua desempata, nomes sem disputar o mesmo portal, ≥ 1 km nunca decide, trilateração com ruído de 10 m e com origens mal espalhadas |
 | `tests/keylist-scenario.test.js` | lista de chaves, cenário sintético com a estrutura do teste real: já cadastrados reconhecidos sem renomear (acento, artigo, erro de digitação, sufixo de rua, ≥ 1 km), empate com o candidato certo, nomes sem portal abaixo de 50%, linha repetida, nenhum nome repetido, "Mural 1"/"Mural 2" separados |
 | `tests/real-16112026.test.js` | caso real de 16/11 (4 prints contra o arquivo do Brooklin). Roda só com as fixtures em `tests/fixtures-local/`, que ficam fora do git por terem a posição de onde os prints foram tirados; sem elas, é pulado |
+| `tests/max-keys.test.js` | Máx. chaves por portal: leque de 30 portais com maxKeys=8, várias âncoras, maxKeys=50 igual à v1.11.0 (`tests/fixtures/optimizer-1.11.0.js`), import sem maxKeys → 8 |
 | `tests/printread.test.js` | leitura da IA: resposta válida, JSON inválido ou fora do formato recusado (inclusive campo de jogador), pedido com cabeçalho de navegador e json_schema, erros 401/429/5xx/rede, chave fora de mensagens, logs e export, recurso desligado por padrão |
 | `tests/review-fixes.test.js` | ids `__proto__`/`constructor`/`toString` em portais, bloqueadores, done e excluded; portais na mesma posição nunca linkados; portal visitado sem links vira destino do fan |
 
