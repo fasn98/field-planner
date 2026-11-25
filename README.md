@@ -106,7 +106,7 @@ tela inicial" instala o app e ele abre sem internet (os tiles já visualizados f
   automaticamente** (ver Plano fixo). O **modo em campo** só libera quando você tiver todas as chaves da lista
   de farm, e então executa **o mesmo plano**, na mesma ordem e com os mesmos links, conferido com as chaves
   reais, sem recalcular.
-- **Ajustes → Máx. chaves por portal** (padrão 8, faixa 1–50) → o otimizador nunca planeja mais links
+- **Aba Plano → Máx. chaves por portal** (padrão 8, faixa 1–50) → o otimizador nunca planeja mais links
   chegando num portal do que esse limite, inclusive na simulação. Fora da simulação o limite efetivo é
   o menor entre ele e as chaves que você tem. Com o limite, o fanfield testa também planos com 2 ou 3
   âncoras (cada uma recebendo até o limite) e fica com o que mais rende no objetivo escolhido. A lista
