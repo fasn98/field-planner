@@ -2,6 +2,24 @@
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Datas no formato AAAA-MM-DD.
 
+## [1.11.2] — 2026-11-18
+### Adicionado
+- **Observações de listas de chaves no export/import do JSON**, para juntar as leituras de dois aparelhos (computador e celular) na trilateração.
+  - Exportar pergunta "Incluir observações?" quando há observações: elas guardam a posição, a data e a hora de cada print. Cancelar exporta sem elas.
+  - O arquivo leva só os campos de uma observação (`observacoes`: nome, endereço, distância, nível, chaves, origem e hora). A chave da API e as imagens nunca entram.
+  - Importar **pergunta antes** ("Importe só se forem SUAS": observações de outro jogador não podem ser guardadas) e então junta as observações às deste aparelho, sem repetir, com cada uma validada (`sanitizeObservation`, `mergeObservations` em `matching.js`, indexada por nome), e guarda as 2000 mais recentes. Hora no futuro vira a hora atual.
+- 6 testes novos (`tests/observations-export.test.js`), incluindo 2 leituras num aparelho + 1 no outro dando a posição estimada só depois de juntar.
+
+## [1.11.1] — 2026-11-18
+### Alterado
+- **Importar lista de links confere nome, além de distância** (a mesma regra de todas as formas de cadastro):
+  - entram desmarcadas, com aviso, as linhas com nome igual ao de um portal do app ou ao de uma linha anterior da lista, e as que ficam a menos de 30 m de um portal do app ou de outra linha (antes só a menos de 10 m);
+  - `Portal NN`, automático das linhas sem nome ou digitado, não conta como nome repetido;
+  - o aviso é refeito ao editar o nome na prévia;
+  - marcar de novo uma linha com aviso e importar pede confirmação; cancelar volta à prévia sem perder nada;
+  - a regra é uma função pura, `bulkDuplicates` em `matching.js`, com 9 testes (`tests/bulk-duplicates.test.js`).
+- Decisão registrada: geocodificar o endereço do print (ADR-0004) foi **rejeitada** pelo dono; a política de conformidade não muda.
+
 ## [1.11.0] — 2026-11-18
 ### Adicionado
 - **Nomear por print → Chaves sem portal no app:** o nome lido que não casa com nenhum portal do app vira um "portal potencial" para cadastrar. A seção substitui "Longe daqui".

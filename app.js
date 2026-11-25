@@ -8,7 +8,7 @@
   'use strict';
 
   var STORE = 'fieldplanner.v1';
-  var VERSION = '1.11.0';
+  var VERSION = '1.11.2';
   // nível padrão de portal novo ou importado sem nível: L1 só alcança 160 m e quase nunca fecha campo
   var DEFAULT_LEVEL = 5;
   // Qualquer string de 1–64 caracteres sem controle. A segurança contra "constructor"/"__proto__"
@@ -1174,12 +1174,21 @@
   $('#clearExclBtn').addEventListener('click', function () { db.excluded = []; save(); invalidatePlan(); });
 
   $('#exportBtn').addEventListener('click', function () {
-    var data = FPPlan.exportPayload(db); // lista fechada: chave da API e prints nunca entram
+    // observações de prints só entram se o usuário escolher: elas têm as posições de onde cada print foi tirado
+    var obs = typeof loadObs === 'function' ? loadObs() : [];
+    var ask = obs.length ? confirmDialog('Incluir observações?', 'Incluir no arquivo as ' + obs.length + ' observação(ões) de listas de chaves? ' +
+      'Elas guardam a posição, a data e a hora de cada print (um histórico de onde você esteve). Servem para juntar as leituras deste aparelho com as do outro ' +
+      '(a trilateração usa as duas). Confirmar inclui; Cancelar exporta sem elas.') : Promise.resolve(false);
+    ask.then(function (withObs) { exportFile(withObs ? obs : null); });
+  });
+  function exportFile(obs) {
+    var data = FPPlan.exportPayload(db, null, obs ? { observacoes: obs } : null); // lista fechada: chave da API e imagens nunca entram
     var blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     var a = el('a', { href: URL.createObjectURL(blob), download: 'field-planner-' + new Date().toISOString().slice(0, 10) + '.json' });
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
-  });
+    if (obs) toast('Exportado com ' + obs.length + ' observação(ões) de prints', 4000);
+  }
   $('#importBtn').addEventListener('click', function () { $('#importFile').click(); });
   $('#importFile').addEventListener('change', function (e) {
     var file = e.target.files && e.target.files[0];
@@ -1264,8 +1273,31 @@
     if (db.portals.length) map.fitBounds(L.latLngBounds(db.portals.map(function (p) { return [p.lat, p.lng]; })).pad(0.2));
     invalidatePlan();
     toast('Importado: ' + added + ' novo(s), ' + updated + ' atualizado(s)' + (kept ? ', ' + kept + ' já existente(s) mantido(s)' : '') + ', ' + nb + ' bloqueador(es)', 5000);
+    if (!Array.isArray(data) && Array.isArray(data.observacoes) && data.observacoes.length) {
+      // depois do resumo do import, para não apagá-lo
+      var obsList = data.observacoes;
+      setTimeout(function () { askImportObservations(obsList); }, 1200);
+    }
     var rec = Array.isArray(data) ? null : FPPlan.sanitizeRecord(data.plan);
     if (rec && rec.result.links.length) offerPlanRestore(rec);
+  }
+  /**
+   * Observações de prints no arquivo: só entram com confirmação. São posições e horários de quem tirou os prints;
+   * de outro jogador, não podem ser guardadas (política de conformidade, regra 4).
+   */
+  function askImportObservations(list) {
+    confirmDialog('Observações no arquivo', 'O arquivo traz ' + list.length + ' observação(ões) de listas de chaves, com a posição, a data e a hora ' +
+      'de cada print. Importe só se forem SUAS (do seu outro aparelho): dados de outros jogadores não podem ser guardados. Importar?')
+      .then(function (ok) { if (ok) importObservations(list); else toast('Observações do arquivo não importadas', 4000); });
+  }
+  /** Observações de prints de outro aparelho: juntam com as daqui (sem repetir) e entram na trilateração. */
+  function importObservations(list) {
+    var r = FPMatch.mergeObservations(observations, list, 2000);
+    if (!r.added) { if (list.length) toast('Observações do arquivo já estavam aqui (' + list.length + ')', 4000); return; }
+    observations = r.list; saveObs(observations);
+    refreshSuggestions(); renderNameBox();
+    toast(r.added + ' observação(ões) de prints juntada(s) às deste aparelho' + (r.invalid ? ' (' + r.invalid + ' inválida(s) ignorada(s))' : '') +
+      '. "Esquecer observações" apaga.', 6000);
   }
 
   /** Troca ids de portal (strings exatas) em bloqueadores, pares, coveredManual e plano do arquivo. */
@@ -1396,7 +1428,6 @@
       if (hit) dup = 'já cadastrado: ' + hit.nome;
       else if ((hit = accepted.find(r))) dup = 'repetido da linha ' + hit.linha;
       r.dup = dup;
-      r.use = !dup;
       if (!dup) accepted.add(r);
       return r;
     });
@@ -1408,7 +1439,23 @@
         if (!r.erro && !r.nome && !!r.dup === dupPass) r.nome = 'Portal ' + String(n++).padStart(2, '0');
       });
     });
+    // a mesma regra dos outros cadastros: nome repetido e portal a menos de 30 m entram desmarcados, com aviso
+    var w = bulkWarnings(bulkRows, function (r) { return !r.erro && !r.dup; });
+    bulkRows.forEach(function (r, i) { if (!r.erro) { r.warn = w[i]; r.use = !r.dup && !w[i]; } });
     renderBulk();
+  }
+
+  /** Avisos de possível duplicata por linha (regra pura em FPMatch.bulkDuplicates), em texto para a prévia. */
+  function bulkWarnings(rows, consider) {
+    return FPMatch.bulkDuplicates(rows, db.portals, consider).map(function (list) {
+      if (!list) return null;
+      return list.map(function (w) {
+        if (w.type === 'nameApp') return 'nome já cadastrado: ' + w.portal.nome;
+        if (w.type === 'nameRow') return 'mesmo nome da linha ' + w.linha;
+        if (w.type === 'nearApp') return 'portal perto: ' + w.portal.nome + ' a ' + fmtDist(w.d);
+        return 'perto da linha ' + w.linha + ' (' + fmtDist(w.d) + ')';
+      }).join(' · ');
+    });
   }
 
   /** Próximo número livre para "Portal NN", olhando os portais salvos e as linhas da prévia. */
@@ -1435,13 +1482,25 @@
         ]));
         return;
       }
-      if (r.dup) dup++; else ok++;
+      if (r.dup || r.warn) dup++; else ok++;
       var cb = el('input', { type: 'checkbox', 'aria-label': 'Importar linha ' + r.linha });
       cb.checked = r.use;
       cb.addEventListener('change', function () { r.use = cb.checked; updateBulkSave(); });
       var name = el('input', { type: 'text', maxlength: '80', placeholder: 'Nome (opcional)', 'aria-label': 'Nome do portal da linha ' + r.linha });
       name.value = r.nome || '';
-      name.addEventListener('input', function () { r.nome = name.value; updateBulkSave(); });
+      var meta = el('div', { class: 'meta' + (r.dup || r.warn ? ' warn' : '') });
+      var setMeta = function () {
+        meta.textContent = 'Linha ' + r.linha + ' · ' + r.lat.toFixed(6) + ', ' + r.lng.toFixed(6) + (r.dup ? ' · ' + r.dup : '') + (r.warn ? ' · ⚠ ' + r.warn : '');
+        meta.className = 'meta' + (r.dup || r.warn ? ' warn' : '');
+      };
+      setMeta();
+      name.addEventListener('input', function () {
+        r.nome = name.value;
+        // nome editado: confere de novo esta linha contra o app e as linhas anteriores
+        var idx = bulkRows.indexOf(r);
+        r.warn = bulkWarnings(bulkRows.slice(0, idx + 1), function (x) { return !x.erro; })[idx];
+        setMeta(); updateBulkSave();
+      });
       // Enter não pode submeter o formulário (o botão padrão é "Cancelar" e perderia a edição)
       name.addEventListener('keydown', function (e) {
         if (e.key !== 'Enter') return;
@@ -1449,10 +1508,7 @@
         var all = ul.querySelectorAll('input[type=text]'), i = Array.prototype.indexOf.call(all, name);
         if (all[i + 1]) all[i + 1].focus(); else name.blur();
       });
-      ul.appendChild(el('li', { class: 'bulk-row' }, [
-        cb, name,
-        el('div', { class: 'meta' + (r.dup ? ' warn' : ''), text: 'Linha ' + r.linha + ' · ' + r.lat.toFixed(6) + ', ' + r.lng.toFixed(6) + (r.dup ? ' · ' + r.dup : '') })
-      ]));
+      ul.appendChild(el('li', { class: 'bulk-row' }, [cb, name, meta]));
     });
     $('#bulkSummary').textContent = bulkRows.length
       ? ok + ' novo(s) · ' + dup + ' possível(is) duplicado(s) · ' + err + ' linha(s) sem coordenadas'
@@ -1469,6 +1525,19 @@
 
   $('#bulkDlg').addEventListener('close', function () {
     if ($('#bulkDlg').returnValue !== 'save') return;
+    // marcada de novo pelo jogador, linha com aviso pede confirmação (nada entra em duplicata sem perguntar)
+    var w = bulkWarnings(bulkRows, function (r) { return r.use; });
+    var risky = bulkRows.filter(function (r, i) { return !r.erro && r.use && (r.dup || w[i]); }).map(function (r) {
+      return 'linha ' + r.linha + ' (' + String(r.nome || '').trim() + '): ' + (r.dup || w[bulkRows.indexOf(r)]);
+    });
+    if (!risky.length) { importBulkRows(); return; }
+    confirmDialog('Pode ser duplicata', risky.length + ' linha(s) marcada(s) podem ser portal já cadastrado ou repetido: ' + risky.slice(0, 4).join('; ') +
+      (risky.length > 4 ? '; …' : '') + '. Importar mesmo assim?').then(function (ok) {
+      if (ok) { importBulkRows(); return; }
+      renderBulk(); $('#bulkDlg').returnValue = ''; $('#bulkDlg').showModal(); // volta à prévia, sem perder nada
+    });
+  });
+  function importBulkRows() {
     var nivel = clampInt(bulkForm.nivel.value, 1, 8, DEFAULT_LEVEL), chaves = clampInt(bulkForm.chaves.value, 0, 999, 0);
     var added = [], n = nextPortalNumber(), before = snapshot();
     bulkRows.forEach(function (r) {
@@ -1484,8 +1553,8 @@
     save();
     map.fitBounds(L.latLngBounds(added.map(function (p) { return [p.lat, p.lng]; })).pad(0.2));
     invalidatePlan();
-    toast(added.length + ' portal(is) importado(s). Ajuste nível e chaves na lista.', 4000);
-  });
+    toast(added.length + ' portal(is) importado(s). Ajuste nível e chaves na lista. ↶ Desfazer remove.', 4000);
+  }
 
   function renderUndoImport() {
     var b = $('#undoImportBtn'), li = db.lastImport;
