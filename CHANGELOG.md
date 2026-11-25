@@ -2,6 +2,16 @@
 
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). Datas no formato AAAA-MM-DD.
 
+## [1.13.0] — 2026-11-25
+### Adicionado
+- **Ajustes → Importar print do Intel** (ADR-0005): lê no aparelho, por canvas, um print do Intel (mapa escuro) que o usuário tirou. Sem IA e sem nenhuma requisição; a imagem não é guardada.
+  - Detecção por cores fixas: neutros (miolo 86,86,86 ±3 com anel branco), verde/azul (miolo cercado pelo anel de ressonadores), Machina (vermelho/rosa); links verdes/azuis por Hough; portais sob campo pela sombra do campo; interface ignorada.
+  - Georreferência por 1 a 3 portais tocados no print (portal cadastrado ou link do Google Maps): 1 ponto só translada com a escala padrão 156543.03·cos(lat)/2^z/DPR (z=15, DPR do aparelho, editáveis); 2+ ajustam a escala e mostram o resíduo de cada ponto; acima de 30 m não grava.
+  - Prévia sobre o print antes de gravar. Portais novos "Print NN" ("ESTIMADO pelo print DD/MM HH:MM"); a < 15 m de um existente só atualiza a facção. Links viram bloqueadores com origem e data; ponta fora do print vira o novo bloqueador **segmento** (sem portal), respeitado pelo otimizador e pela validação do plano. Portais sob campo entram em `coveredManual`. ↶ Desfazer volta tudo.
+- Bloqueadores de print mostram a idade; **Apagar bloqueios de print com mais de X dias** (padrão 3).
+- Portal guarda a **facção** (`faccao`, só a cor). A regra 4 da política de conformidade foi atualizada.
+- 11 testes novos (`tests/intelprint.test.js`, prints sintéticos) e 3 com os prints reais de 25/11 (`tests/intel-real-25112026.test.js`, pulados sem as fixtures locais).
+
 ## [1.12.0] — 2026-11-25
 ### Adicionado
 - **Ajustes → Máx. chaves por portal** (padrão 8, faixa 1–50, `settings.maxKeys`): o otimizador nunca planeja mais links chegando num portal do que o limite, também em modo Simulação. Fora da simulação o limite efetivo é min(maxKeys, chaves que tenho).

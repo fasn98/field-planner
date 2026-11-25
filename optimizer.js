@@ -53,7 +53,16 @@
     });
 
     var fixed = [];
+    // bloqueador "segmento" (de print, ponta fora da tela): só a reta, sem portal
+    var segs = [];
     (input.blockers || []).forEach(function (b) {
+      if (!b || b.tipo !== 'segmento' || !b.a || !b.b) return;
+      if (G.haversine(ref, b.a) > FAR_M || G.haversine(ref, b.b) > FAR_M) return;
+      var A = proj.toXY(b.a), B = proj.toXY(b.b);
+      segs.push({ a: { x: A.x, y: A.y }, b: { x: B.x, y: B.y }, kind: b.origem === 'aliado' ? 'ally' : 'enemy', nome: b.nota || 'segmento' });
+    });
+    (input.blockers || []).forEach(function (b) {
+      if (b && b.tipo === 'segmento') return;
       if (idx[b.portalA] === undefined || idx[b.portalB] === undefined || b.portalA === b.portalB) return;
       if (pts[idx[b.portalA]].far || pts[idx[b.portalB]].far) return;
       fixed.push({ a: idx[b.portalA], b: idx[b.portalB], kind: b.origem === 'aliado' ? 'ally' : 'enemy' });
@@ -91,7 +100,7 @@
       .filter(function (i) { return i !== undefined; });
 
     return {
-      pts: pts, idx: idx, fixed: fixed, excluded: excluded, candidates: candidates, forcedCovered: forcedCovered, inRadius: inRadius,
+      pts: pts, idx: idx, fixed: fixed, segs: segs, excluded: excluded, candidates: candidates, forcedCovered: forcedCovered, inRadius: inRadius,
       position: input.position || null,
       maxOut: Math.max(1, Math.floor(Number(input.maxOut) || 8)),
       maxKeys: normMaxKeys(input.maxKeys),
@@ -162,6 +171,9 @@
     for (var i = 0; i < this.links.length; i++) {
       var l = this.links[i];
       if (G.segmentsCross(P[s], P[t], P[l.a], P[l.b])) return 'cruza link';
+    }
+    for (i = 0; i < w.segs.length; i++) {
+      if (G.segmentsCross(P[s], P[t], w.segs[i].a, w.segs[i].b)) return 'cruza segmento';
     }
     return null;
   };

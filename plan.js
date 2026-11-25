@@ -227,6 +227,7 @@
             'cruza ' + what + (hit ? P[hit.a].nome + ' – ' + P[hit.b].nome : ''));
           return;
         }
+        if (why === 'cruza segmento') { add(l, 'bloqueador', 'cruza um bloqueador de print (segmento com ponta fora do print)'); return; }
         if (why === 'limite de chaves por portal') { add(l, 'chave', name(l.to) + ' passaria de ' + world.maxKeys + ' chaves por portal (Máx. chaves por portal)'); return; }
         if (why === 'sem chave do destino') { add(l, 'chave', 'sem chave de ' + name(l.to) + ' para este link'); return; }
         if (why) { add(l, 'invalido', why); return; }
